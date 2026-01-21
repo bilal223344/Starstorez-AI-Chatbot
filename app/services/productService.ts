@@ -120,3 +120,34 @@ export const saveProductToDB = async (
         throw error;
     }
 };
+
+export const deleteProductFromDB = async (shopifyId: string) => {
+    try {
+        // 1. Find the internal database ID first
+        const product = await prisma.product.findUnique({
+            where: { prodId: shopifyId }
+        });
+
+        if (!product) {
+            console.log(`[DB] Product ${shopifyId} not found, nothing to delete.`);
+            return;
+        }
+
+        // 2. Perform a Transaction: Delete Kids -> Then Delete Parent
+        await prisma.$transaction([
+            // Step A: Delete all variants linked to this product
+            prisma.productVariant.deleteMany({
+                where: { productId: product.id }
+            }),
+            // Step B: Delete the product itself
+            prisma.product.delete({
+                where: { id: product.id }
+            })
+        ]);
+
+        console.log(`[DB] Successfully deleted product and variants for ${shopifyId}`);
+
+    } catch (error) {
+        console.error(`[DB Error] Failed to delete ${shopifyId}:`, error);
+    }
+};

@@ -56,15 +56,73 @@ model Product {
 }
 
 model ProductVariant {
-  id     Int    @id @default(autoincrement())
+  id     Int     @id @default(autoincrement())
   title  String
   sku    String
   image  String?
   option String
   stock  Int
 
-  product   Product @relation(fields: [productId], references: [id])
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
   productId Int
 
   @@index([productId])
+}
+
+model Customer {
+  id        String   @id @default(uuid())
+  shopifyId String?  @unique
+  email     String   @unique
+  firstName String?
+  lastName  String?
+  phone     String?
+  source    String   @default("SHOPIFY") // e.g. "SHOPIFY", "MANUAL", "WEBSITE"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orders Order[]
+  chats  ChatSession[]
+}
+
+model Order {
+  id          String      @id @default(uuid())
+  shopifyId   String      @unique // gid://shopify/Order/123
+  orderNumber String
+  status      String // e.g., "FULFILLED", "OPEN"
+  totalPrice  Float
+  createdAt   DateTime
+  customerId  String
+  customer    Customer    @relation(fields: [customerId], references: [id])
+  items       OrderItem[]
+}
+
+model OrderItem {
+  id          String  @id @default(uuid())
+  ProductId   String
+  productName String
+  quantity    Int
+  sku         String?
+  orderId     String
+  order       Order   @relation(fields: [orderId], references: [id])
+}
+
+// For your Chatbot history
+model ChatSession {
+  id         String    @id @default(uuid())
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
+  isGuest    Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+
+  messages Message[]
+}
+
+model Message {
+  id        String   @id @default(uuid())
+  content   String
+  role      String // "user", "assistant", or "system"
+  createdAt DateTime @default(now())
+
+  sessionId String
+  session   ChatSession @relation(fields: [sessionId], references: [id])
 }

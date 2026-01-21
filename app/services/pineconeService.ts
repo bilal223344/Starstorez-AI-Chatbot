@@ -3,6 +3,27 @@ import { ShopifyProductNode } from "./productService";
 const PINECONE_API_KEY = process.env.PINECONE_API_KEY || "";
 const INDEX_HOST = process.env.INDEX_HOST || "";
 
+interface PineconeNamespaceResponse {
+    namespaces?: {
+        name: string;
+        record_count?: number;
+    }[];
+}
+
+type RawMetadata = Record<string, unknown>;
+
+type PineconeMetadata = Record<string, string | number | boolean | string[]>;
+
+interface PineconeRecord {
+    id: string;
+    values: number[];
+    metadata: RawMetadata;
+}
+
+interface PineconeEmbedResponse {
+    data: { values: number[] }[];
+}
+
 // ============================================================================
 // MAIN EXPORTS
 // ============================================================================
@@ -26,7 +47,7 @@ export const batchProcessPinecone = async (namespace: string, products: ShopifyP
                     console.error("    Skipping malformed product:", product.id);
                     return null;
                 }
-            }).filter(item => item !== null) as { textToEmbed: string, metadata: any }[];
+            }).filter(item => item !== null) as { textToEmbed: string, metadata: RawMetadata }[];
 
             if (preparedData.length === 0) continue;
 
@@ -35,8 +56,8 @@ export const batchProcessPinecone = async (namespace: string, products: ShopifyP
             const vectors = await generateEmbeddings(texts);
 
             // C. Map Vectors to Metadata
-            const pineconeRecords = preparedData.map((item, index) => ({
-                id: `shopify_${item.metadata.product_id.split("/").pop()}`,
+            const pineconeRecords: PineconeRecord[] = preparedData.map((item, index) => ({
+                id: `shopify_${(item.metadata.product_id as string).split("/").pop()}`,
                 values: vectors[index],
                 metadata: item.metadata
             }));
@@ -69,8 +90,8 @@ export const checkPineconeNamespace = async (shop: string) => {
         });
 
         if (!res.ok) return { success: false };
-        const data = await res.json();
-        const exists = data.namespaces?.some((n: any) => n.name === shopUrl);
+        const data = await res.json() as PineconeNamespaceResponse;
+        const exists = data.namespaces?.some((n) => n.name === shopUrl);
         return { success: exists, pcNamespace: exists ? shopUrl : null };
     } catch (error) {
         return { success: false };
@@ -138,18 +159,18 @@ const generateEmbeddings = async (texts: string[]) => {
             throw new Error(JSON.stringify(err));
         }
 
-        const data = await response.json();
-        return data.data.map((item: any) => item.values);
+        const data = await response.json() as PineconeEmbedResponse;
+        return data.data.map((item) => item.values);
     } catch (error) {
         console.error("Embedding generation failed:", error);
         throw error;
     }
 };
 
-const upsertVectors = async (namespace: string, records: any[]) => {
+const upsertVectors = async (namespace: string, records: PineconeRecord[]) => {
     // Sanitizer: Converts complex objects to JSON strings
-    const sanitizeMetadata = (meta: any) => {
-        const clean: any = {};
+    const sanitizeMetadata = (meta: RawMetadata): PineconeMetadata => {
+        const clean: PineconeMetadata = {};
         for (const [key, value] of Object.entries(meta)) {
             if (typeof value === 'object' && value !== null) {
                 if (Array.isArray(value) && value.every(v => typeof v === 'string')) {
@@ -158,7 +179,7 @@ const upsertVectors = async (namespace: string, records: any[]) => {
                     clean[key] = JSON.stringify(value);
                 }
             } else {
-                clean[key] = value;
+                clean[key] = value as string | number | boolean;
             }
         }
         return clean;
@@ -238,6 +259,61 @@ const prepareProductForPinecone = (product: ShopifyProductNode) => {
         tags: product.tags,
         options: JSON.stringify(product.options),
         variants: JSON.stringify(flattenedVariants)
+    };
+
+    return { textToEmbed, metadata };
+};
+
+
+export const deleteVectorFromPinecone = async (namespace: string, vectorId: string) => {
+    try {
+        const response = await fetch(`https://${process.env.INDEX_HOST}/vectors/delete`, {
+            method: "POST",
+            headers: {
+                "Api-Key": process.env.PINECONE_API_KEY || "",
+                "Content-Type": "application/json",
+                "X-Pinecone-Api-Version": "2025-10"
+            },
+            body: JSON.stringify({
+                namespace: namespace,
+                ids: [vectorId]
+            })
+        });
+
+        if (!response.ok) {
+            const err = await response.json();
+            console.error("[Pinecone Delete Error]", err);
+        } else {
+            console.log(`[Pinecone] Deleted vector ${vectorId}`);
+        }
+    } catch (error) {
+        console.error("[Pinecone Network Error]", error);
+    }
+};
+
+export const prepareOrderForPinecone = (order: any) => {
+    // order argument is the result from prisma.order.upsert (includes items and customer)
+    
+    const itemNames = order.items.map((i: any) => `${i.quantity}x ${i.productName}`).join(", ");
+    
+    // 1. Text Context: This is what the AI searches against
+    const textToEmbed = `
+        Order Number: ${order.orderNumber}
+        Status: ${order.status}
+        Items: ${itemNames}
+        Total: ${order.totalPrice}
+        Date: ${order.createdAt.toISOString()}
+    `.trim().replace(/\s+/g, " ");
+
+    // 2. Metadata: CRITICAL for filtering
+    // We use order.customer.id (The Prisma UUID) so the Chatbot knows who owns this order
+    const metadata = {
+        type: "ORDER",
+        order_id: order.shopifyId, // External ID
+        internal_user_id: order.customer.id, // Internal UUID for filtering
+        order_number: order.orderNumber,
+        status: order.status,
+        text_content: textToEmbed // Store text so AI can read it without hitting DB again
     };
 
     return { textToEmbed, metadata };
