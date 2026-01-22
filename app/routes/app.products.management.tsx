@@ -1,11 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
+import { useEffect, useCallback, ChangeEvent } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
     useLoaderData,
     useFetcher,
     useSearchParams,
-    useSubmit,
-    Form,
     useNavigation
 } from "react-router";
 import { authenticate } from "../shopify.server";
@@ -13,7 +11,6 @@ import { syncProduct } from "../services/productService";
 import prisma from "../db.server";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import type { Prisma } from "@prisma/client";
-import { CallbackEvent } from "@shopify/polaris-types";
 
 // ============================================================================
 // TYPES
@@ -74,8 +71,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
 
     const orderBy: Prisma.ProductOrderByWithRelationInput = {};
-    // Dynamic key access safe here due to explicit fallback
-    // @ts-expect-error - Dynamic key access safe here due to explicit fallback
+    // @ts-expect-error - Dynamic key access
     orderBy[sortBy] = sortOrder === "asc" ? "asc" : "desc";
 
     const [products, totalProducts, stats, allProducts] = await Promise.all([
@@ -87,7 +83,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             take: pageSize,
         }),
         prisma.product.count({ where }),
-        // GroupBy is more efficient for stats
         prisma.product.groupBy({
             by: ['isSynced'],
             where: { shop },
@@ -96,7 +91,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         prisma.product.findMany({ where: { shop }, select: { collection: true } })
     ]);
 
-    // Parse Stats
     const syncedCount = stats.find(s => s.isSynced)?._count || 0;
     const pendingCount = stats.find(s => !s.isSynced)?._count || 0;
 
@@ -113,7 +107,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         totalProducts,
         syncedCount,
         pendingCount,
-        errorCount: 0,
         lastSyncTime: lastSyncedProduct?.updatedAt || null,
         collections,
         shop,
@@ -135,24 +128,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     try {
         switch (intent) {
             case "sync": {
+                // This awaits the long-running process (e.g. 10s)
                 const result = await syncProduct(shop, session.accessToken!);
                 return { success: true, message: "Sync completed", result };
-            }
-            case "update-frequency": {
-                return { success: true, frequency: formData.get("frequency") };
-            }
-            case "bulk-link": {
-                const productIds = formData.getAll("productIds").map(id => parseInt(id as string));
-                await prisma.product.updateMany({
-                    where: { shop, id: { in: productIds } },
-                    data: { isSynced: true },
-                });
-                return { success: true, message: `${productIds.length} products linked` };
-            }
-            case "link-product": {
-                const id = parseInt(formData.get("productId") as string);
-                await prisma.product.update({ where: { id }, data: { isSynced: true } });
-                return { success: true, message: `Product linked` };
             }
             default:
                 return { success: false, message: "Unknown action" };
@@ -170,211 +148,203 @@ export default function ProductsManagement() {
     const loaderData = useLoaderData<typeof loader>();
     const fetcher = useFetcher<typeof action>();
     const [searchParams, setSearchParams] = useSearchParams();
-    const submit = useSubmit();
     const navigation = useNavigation();
     const shopify = useAppBridge();
 
-    // Local selection state
-    const [selectedProducts, setSelectedProducts] = useState<Set<number>>(new Set());
-
-    // Client-side persistence for frequency
-    const [syncFrequency, setSyncFrequency] = useState(() =>
-        (typeof window !== "undefined" ? localStorage.getItem("syncFrequency") : "real-time") || "real-time"
-    );
-
-    // Toast & Error Handling
+    // --- Effects ---
     useEffect(() => {
         if (fetcher.data) {
             const isError = !fetcher.data.success;
             shopify.toast.show(fetcher.data.message || (isError ? "Action failed" : "Success"), { isError });
-
-            if (fetcher.data.success) {
-                if (fetcher.data.frequency) localStorage.setItem("syncFrequency", fetcher.data.frequency as string);
-                if (fetcher.state === "idle" && !fetcher.data.frequency) setSelectedProducts(new Set());
-            }
         }
-    }, [fetcher.data, fetcher.state, shopify]);
+    }, [fetcher.data, shopify]);
 
     // --- Handlers ---
 
-    // Debounced Search Handler
+    // Generic URL updater helper
+    const updateParam = useCallback((key: string, value: string) => {
+        const newParams = new URLSearchParams(searchParams);
+        if (value) {
+            newParams.set(key, value);
+        } else {
+            newParams.delete(key);
+        }
+        // Reset to page 1 on filter change
+        if (key !== "page") newParams.set("page", "1");
+        setSearchParams(newParams);
+    }, [searchParams, setSearchParams]);
+
+    // Debounced Search
     const handleSearch = useCallback((e: Event) => {
         const target = e.target as HTMLInputElement;
-        const form = target.closest('form');
-        if (form) {
-            submit(form, { replace: true });
-        }
-    }, [submit]);
+        const value = target.value;
+        // Simple debounce could be added here if needed, 
+        // but react-router usually handles rapid setSearchParams calls gracefully
+        updateParam("search", value);
+    }, [updateParam]);
 
-    // Manual Submit for Popover controls
-    const handleControlChange = (e: Event) => {
-        const target = e.target as HTMLElement;
-        const form = target.closest('form');
-        if (form) submit(form);
-    };
-
-    // Handle pagination via URL
-    const handlePageChange = (direction: 'next' | 'prev') => {
-        const newPage = direction === 'next' ? loaderData.page + 1 : loaderData.page - 1;
-        const newParams = new URLSearchParams(searchParams);
-        newParams.set("page", newPage.toString());
-        setSearchParams(newParams);
+    // Sort Handler for s-choice-list
+    const handleSortChange = (key: "sortBy" | "sortOrder", e: Event) => {
+        // App Bridge ChoiceList emits event with target.value (string) or target.values (array)
+        const target = e.target as any;
+        // Depending on version, it might be .value or .values[0]
+        const value = target.value || (target.values && target.values[0]);
+        if (value) updateParam(key, value);
     };
 
     const handleSync = () => fetcher.submit({ intent: "sync" }, { method: "POST" });
 
-    const handleFrequencyChange = (frequency: string) => {
-        setSyncFrequency(frequency);
-        fetcher.submit({ intent: "update-frequency", frequency }, { method: "POST" });
-    };
-
-    const handleBulkAction = (intent: "bulk-link") => {
-        if (selectedProducts.size === 0) return;
-        const formData = new FormData();
-        formData.set("intent", intent);
-        selectedProducts.forEach((id) => formData.append("productIds", id.toString()));
-        fetcher.submit(formData, { method: "POST" });
-    };
-
-    const toggleProductSelection = (productId: number) => {
-        const newSelected = new Set(selectedProducts);
-        if (newSelected.has(productId)) newSelected.delete(productId);
-        else newSelected.add(productId);
-        setSelectedProducts(newSelected);
-    };
-
-    const toggleAllSelection = () => {
-        if (selectedProducts.size === loaderData.products.length) setSelectedProducts(new Set());
-        else setSelectedProducts(new Set(loaderData.products.map((p) => p.id)));
-    };
-
+    // --- Loading States ---
     const isSyncing = fetcher.state === "submitting" && fetcher.formData?.get("intent") === "sync";
     const isLoading = navigation.state === "loading";
 
-
-    console.log("loaderData", loaderData.page * loaderData.pageSize, loaderData.totalProducts);
-
     return (
         <s-page heading="Products Management">
+
+            {/* --- Metrics Overview --- */}
             <s-section heading="Overview" padding="base">
-                <s-grid gridTemplateColumns="repeat(4, 1fr)" gap="base">
+                <s-grid gridTemplateColumns="repeat(3, 1fr)" gap="base">
                     <s-box padding="base" borderWidth="base" borderRadius="base" background="subdued">
-                        <s-stack gap="small">
-                            <s-text>Frequency</s-text>
-                            <s-select
-                                value={syncFrequency}
-                                onChange={(e: CallbackEvent<"s-select">) => handleFrequencyChange(e.currentTarget.value)}
+                        <s-grid gap="small-300">
+                            <s-text>Last Sync</s-text>
+                            <s-heading>{loaderData.lastSyncTime ? new Date(loaderData.lastSyncTime).toLocaleDateString() : "Never"}</s-heading>
+                        </s-grid>
+                    </s-box>
+
+                    <s-box padding="base" borderWidth="base" borderRadius="base" background="subdued">
+                        <s-grid gap="small-300">
+                            <s-text>Sync Status</s-text>
+                            <s-stack direction="inline" gap="small-200" alignItems="center">
+                                <s-text>{loaderData.syncedCount} Synced</s-text>
+                                <s-text color="subdued">/</s-text>
+                                <s-text>{loaderData.pendingCount} Pending</s-text>
+                            </s-stack>
+                        </s-grid>
+                    </s-box>
+
+                    <s-box padding="base" borderWidth="base" borderRadius="base" background="subdued">
+                        <s-grid gap="small-300">
+                            <s-text>Quick Actions</s-text>
+                            <s-button
+                                onClick={handleSync}
+                                loading={isSyncing}
+                                variant="primary"
+                                disabled={isSyncing}
                             >
-                                <s-option value="real-time">Real-time</s-option>
-                                <s-option value="hourly">Hourly</s-option>
-                                <s-option value="daily">Daily</s-option>
-                            </s-select>
-                        </s-stack>
-                    </s-box>
-                    <s-box padding="base" borderWidth="base" borderRadius="base" background="subdued">
-                        <s-stack gap="small">
-                            <s-text>Synced / Pending</s-text>
-                            <s-heading>{loaderData.syncedCount} / {loaderData.pendingCount}</s-heading>
-                        </s-stack>
-                    </s-box>
-                    <s-box padding="base" borderWidth="base" borderRadius="base" background="subdued">
-                        <s-stack gap="small">
-                            <s-text>Actions</s-text>
-                            <s-button onClick={handleSync} loading={isSyncing} variant="primary">Sync Now</s-button>
-                        </s-stack>
+                                {isSyncing ? "Syncing..." : "Sync Now"}
+                            </s-button>
+                        </s-grid>
                     </s-box>
                 </s-grid>
             </s-section>
 
-            {/* --- Table Section --- */}
+            {/* --- Index Table Section --- */}
             <s-section padding="none">
                 <s-table
                     paginate
                     hasNextPage={loaderData.page * loaderData.pageSize < loaderData.totalProducts}
                     hasPreviousPage={loaderData.page > 1}
                     loading={isLoading}
-                    onNextPage={() => handlePageChange('next')}
-                    onPreviousPage={() => handlePageChange('prev')}
+                    onNextPage={() => updateParam("page", (loaderData.page + 1).toString())}
+                    onPreviousPage={() => updateParam("page", (loaderData.page - 1).toString())}
                 >
-                    {/* --- Integrated Filters Slot --- */}
+                    {/* --- Filters Slot --- */}
                     <div slot="filters">
-                        <Form method="get" onChange={(e) => submit(e.currentTarget)}>
-                            <s-grid gridTemplateColumns="1fr auto auto auto" gap="small" alignItems="center">
-                                {/* Search Field */}
-                                <s-search-field
-                                    name="search"
-                                    placeholder="Search products..."
-                                    value={searchParams.get("search") || ""}
-                                    onInput={handleSearch}
-                                />
+                        <s-grid gridTemplateColumns="1fr auto auto" gap="small" alignItems="center">
+                            {/* Search Field */}
+                            <s-search-field
+                                placeholder="Search products..."
+                                value={searchParams.get("search") || ""}
+                                onInput={handleSearch}
+                            />
 
-                                {/* Filter Button + Popover */}
-                                <s-button icon="filter" variant="secondary" commandFor="filter-popover">Filter</s-button>
-                                <s-popover id="filter-popover" minInlineSize="300px">
-                                    <s-box padding="base">
-                                        <s-stack gap="base">
-                                            <s-select label="Collection" name="collection" value={searchParams.get("collection") || ""} onChange={handleControlChange}>
-                                                <s-option value="">All Collections</s-option>
-                                                {loaderData.collections.map((col) => (
-                                                    <s-option key={col} value={col}>{col}</s-option>
-                                                ))}
-                                            </s-select>
-                                            <s-select label="Status" name="availability" value={searchParams.get("availability") || ""} onChange={handleControlChange}>
-                                                <s-option value="">All Status</s-option>
-                                                <s-option value="in_stock">In Stock</s-option>
-                                                <s-option value="out_of_stock">Out of Stock</s-option>
-                                            </s-select>
-                                            <s-grid gridTemplateColumns="1fr 1fr" gap="small">
-                                                <s-text-field label="Min $" name="priceMin" value={searchParams.get("priceMin") || ""} onChange={handleControlChange} />
-                                                <s-text-field label="Max $" name="priceMax" value={searchParams.get("priceMax") || ""} onChange={handleControlChange} />
-                                            </s-grid>
-                                            <s-button onClick={() => { setSearchParams(new URLSearchParams()); }} variant="tertiary">Clear all</s-button>
-                                        </s-stack>
-                                    </s-box>
-                                </s-popover>
+                            {/* Filter Button + Popover */}
+                            <s-button icon="filter" variant="secondary" commandFor="filter-popover">Filter</s-button>
+                            <s-popover id="filter-popover" minInlineSize="300px">
+                                <s-box padding="base">
+                                    <s-stack gap="base">
+                                        <s-select
+                                            label="Collection"
+                                            value={searchParams.get("collection") || ""}
+                                            onChange={(e: any) => updateParam("collection", e.target.value)}
+                                        >
+                                            <s-option value="">All Collections</s-option>
+                                            {loaderData.collections.map((col) => (
+                                                <s-option key={col} value={col}>{col}</s-option>
+                                            ))}
+                                        </s-select>
 
-                                {/* Sort Button + Popover */}
-                                <s-button icon="sort" variant="secondary" commandFor="sort-popover" accessibilityLabel="Sort"></s-button>
-                                <s-popover id="sort-popover">
-                                    <s-box padding="small">
-                                        <s-choice-list label="Sort by" name="sortBy" values={[searchParams.get("sortBy") || "updatedAt"]} onChange={handleControlChange}>
-                                            <s-choice value="title">Name</s-choice>
-                                            <s-choice value="price">Price</s-choice>
-                                            <s-choice value="updatedAt">Date Added</s-choice>
-                                        </s-choice-list>
-                                        <s-divider />
-                                        <s-choice-list label="Order" name="sortOrder" values={[searchParams.get("sortOrder") || "desc"]} onChange={handleControlChange}>
-                                            <s-choice value="asc">Ascending</s-choice>
-                                            <s-choice value="desc">Descending</s-choice>
-                                        </s-choice-list>
-                                    </s-box>
-                                </s-popover>
+                                        <s-select
+                                            label="Status"
+                                            value={searchParams.get("availability") || ""}
+                                            onChange={(e: ChangeEvent<HTMLSelectElement>) => updateParam("availability", e.target.value)}
+                                        >
+                                            <s-option value="">All Status</s-option>
+                                            <s-option value="in_stock">In Stock</s-option>
+                                            <s-option value="out_of_stock">Out of Stock</s-option>
+                                        </s-select>
 
-                                {/* Bulk Actions */}
-                                {selectedProducts.size > 0 && (
-                                    <s-stack direction="inline" gap="small">
-                                        <s-button onClick={() => handleBulkAction("bulk-link")} variant="primary">Link ({selectedProducts.size})</s-button>
+                                        <s-grid gridTemplateColumns="1fr 1fr" gap="small">
+                                            <s-text-field
+                                                label="Min $"
+                                                value={searchParams.get("priceMin") || ""}
+                                                onChange={(e: ChangeEvent<"s-text-field">) => updateParam("priceMin", e.currentTarget.value)}
+                                            />
+                                            <s-text-field
+                                                label="Max $"
+                                                value={searchParams.get("priceMax") || ""}
+                                                onChange={(e: ChangeEvent<"s-text-field">) => updateParam("priceMax", e.currentTarget.value)}
+                                            />
+                                        </s-grid>
+
+                                        <s-button
+                                            onClick={() => setSearchParams(new URLSearchParams())}
+                                            variant="tertiary"
+                                        >
+                                            Clear all
+                                        </s-button>
                                     </s-stack>
-                                )}
-                            </s-grid>
-                        </Form>
+                                </s-box>
+                            </s-popover>
+
+                            {/* Sort Button + Popover */}
+                            <s-button icon="sort" variant="secondary" commandFor="sort-popover" accessibilityLabel="Sort"></s-button>
+                            <s-popover id="sort-popover">
+                                <s-box padding="small">
+                                    <s-choice-list
+                                        label="Sort by"
+                                        values={[searchParams.get("sortBy") || "updatedAt"]}
+                                        onChange={(e: ChangeEvent<"s-choice-list">) => handleSortChange("sortBy", e)}
+                                    >
+                                        <s-choice value="title">Name</s-choice>
+                                        <s-choice value="price">Price</s-choice>
+                                        <s-choice value="updatedAt">Date Added</s-choice>
+                                    </s-choice-list>
+
+                                    <s-divider />
+
+                                    <s-choice-list
+                                        label="Order"
+                                        values={[searchParams.get("sortOrder") || "desc"]}
+                                        onChange={(e: CallbackEvent<"s-choice-list">) => handleSortChange("sortOrder", e)}
+                                    >
+                                        <s-choice value="asc">Ascending</s-choice>
+                                        <s-choice value="desc">Descending</s-choice>
+                                    </s-choice-list>
+                                </s-box>
+                            </s-popover>
+                        </s-grid>
                     </div>
 
                     {/* --- Table Header --- */}
                     <s-table-header-row>
-                        <s-table-header>
-                            <s-checkbox
-                                checked={loaderData.products.length > 0 && selectedProducts.size === loaderData.products.length}
-                                onChange={toggleAllSelection}
-                            />
-                        </s-table-header>
                         <s-table-header>Image</s-table-header>
                         <s-table-header>Product</s-table-header>
                         <s-table-header>SKU</s-table-header>
                         <s-table-header>Price</s-table-header>
                         <s-table-header>Stock</s-table-header>
                         <s-table-header>Synced</s-table-header>
-                        <s-table-header>Actions</s-table-header>
+                        <s-table-header>Action</s-table-header>
                     </s-table-header-row>
 
                     {/* --- Table Body --- */}
@@ -383,9 +353,8 @@ export default function ProductsManagement() {
                             <s-table-row>
                                 <s-table-cell></s-table-cell>
                                 <s-table-cell></s-table-cell>
-                                <s-table-cell></s-table-cell>
-                                <s-table-cell></s-table-cell>
                                 <s-table-cell><s-text>No products found</s-text></s-table-cell>
+                                <s-table-cell></s-table-cell>
                                 <s-table-cell></s-table-cell>
                                 <s-table-cell></s-table-cell>
                                 <s-table-cell></s-table-cell>
@@ -393,9 +362,6 @@ export default function ProductsManagement() {
                         ) : (
                             loaderData.products.map((product) => (
                                 <s-table-row key={product.id}>
-                                    <s-table-cell>
-                                        <s-checkbox checked={selectedProducts.has(product.id)} onChange={() => toggleProductSelection(product.id)} />
-                                    </s-table-cell>
                                     <s-table-cell>
                                         <s-thumbnail size="small" src={product.image || ""} alt={product.title} />
                                     </s-table-cell>
@@ -411,17 +377,7 @@ export default function ProductsManagement() {
                                         <s-badge tone={product.isSynced ? "success" : "neutral"}>{product.isSynced ? "Yes" : "No"}</s-badge>
                                     </s-table-cell>
                                     <s-table-cell>
-                                        <s-stack direction="inline" gap="small">
-                                            <s-button onClick={() => shopify.intents.invoke?.("edit:shopify/Product", { value: product.prodId })} variant="tertiary">Edit</s-button>
-                                            {!product.isSynced && (
-                                                <s-button
-                                                    onClick={() => fetcher.submit({ intent: "link-product", productId: product.id.toString() }, { method: "POST" })}
-                                                    variant="primary"
-                                                >
-                                                    Link
-                                                </s-button>
-                                            )}
-                                        </s-stack>
+                                        <s-button onClick={() => shopify.intents.invoke?.("edit:shopify/Product", { value: product.prodId })} variant="tertiary">Edit</s-button>
                                     </s-table-cell>
                                 </s-table-row>
                             ))
