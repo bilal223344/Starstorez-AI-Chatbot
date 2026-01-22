@@ -1,4 +1,4 @@
-import { useEffect, useCallback, ChangeEvent } from "react";
+import { useEffect, useCallback } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
     useLoaderData,
@@ -11,6 +11,7 @@ import { syncProduct } from "../services/productService";
 import prisma from "../db.server";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import type { Prisma } from "@prisma/client";
+import { CallbackEvent } from "@shopify/polaris-types";
 
 // ============================================================================
 // TYPES
@@ -184,11 +185,10 @@ export default function ProductsManagement() {
     }, [updateParam]);
 
     // Sort Handler for s-choice-list
-    const handleSortChange = (key: "sortBy" | "sortOrder", e: Event) => {
-        // App Bridge ChoiceList emits event with target.value (string) or target.values (array)
-        const target = e.target as any;
-        // Depending on version, it might be .value or .values[0]
-        const value = target.value || (target.values && target.values[0]);
+    const handleSortChange = (key: "sortBy" | "sortOrder", e: CallbackEvent<"s-choice-list">) => {
+        // ChoiceList provides the selected value(s) via currentTarget.value or currentTarget.values
+        const value = (e.currentTarget as { value?: string; values?: string[] }).value || 
+                     ((e.currentTarget as { values?: string[] }).values?.[0]);
         if (value) updateParam(key, value);
     };
 
@@ -262,11 +262,11 @@ export default function ProductsManagement() {
                             <s-button icon="filter" variant="secondary" commandFor="filter-popover">Filter</s-button>
                             <s-popover id="filter-popover" minInlineSize="300px">
                                 <s-box padding="base">
-                                    <s-stack gap="base">
+                                    <s-stack gap="small-200">
                                         <s-select
                                             label="Collection"
                                             value={searchParams.get("collection") || ""}
-                                            onChange={(e: any) => updateParam("collection", e.target.value)}
+                                            onChange={(e: CallbackEvent<"s-select">) => updateParam("collection", e.currentTarget.value)}
                                         >
                                             <s-option value="">All Collections</s-option>
                                             {loaderData.collections.map((col) => (
@@ -277,7 +277,7 @@ export default function ProductsManagement() {
                                         <s-select
                                             label="Status"
                                             value={searchParams.get("availability") || ""}
-                                            onChange={(e: ChangeEvent<HTMLSelectElement>) => updateParam("availability", e.target.value)}
+                                            onChange={(e: CallbackEvent<"s-select">) => updateParam("availability", e.currentTarget.value)}
                                         >
                                             <s-option value="">All Status</s-option>
                                             <s-option value="in_stock">In Stock</s-option>
@@ -288,18 +288,18 @@ export default function ProductsManagement() {
                                             <s-text-field
                                                 label="Min $"
                                                 value={searchParams.get("priceMin") || ""}
-                                                onChange={(e: ChangeEvent<"s-text-field">) => updateParam("priceMin", e.currentTarget.value)}
+                                                onInput={(e: CallbackEvent<"s-text-field">) => updateParam("priceMin", e.currentTarget.value)}
                                             />
                                             <s-text-field
                                                 label="Max $"
                                                 value={searchParams.get("priceMax") || ""}
-                                                onChange={(e: ChangeEvent<"s-text-field">) => updateParam("priceMax", e.currentTarget.value)}
+                                                onInput={(e: CallbackEvent<"s-text-field">) => updateParam("priceMax", e.currentTarget.value)}
                                             />
                                         </s-grid>
 
                                         <s-button
                                             onClick={() => setSearchParams(new URLSearchParams())}
-                                            variant="tertiary"
+                                            variant="secondary"
                                         >
                                             Clear all
                                         </s-button>
@@ -314,7 +314,7 @@ export default function ProductsManagement() {
                                     <s-choice-list
                                         label="Sort by"
                                         values={[searchParams.get("sortBy") || "updatedAt"]}
-                                        onChange={(e: ChangeEvent<"s-choice-list">) => handleSortChange("sortBy", e)}
+                                        onChange={(e: CallbackEvent<"s-choice-list">) => handleSortChange("sortBy", e)}
                                     >
                                         <s-choice value="title">Name</s-choice>
                                         <s-choice value="price">Price</s-choice>
