@@ -1,28 +1,7 @@
-import { ShopifyProductNode } from "./productService";
+import { PineconeEmbedResponse, PineconeMetadata, PineconeNamespaceResponse, PineconeRecord, RawMetadata, SavedOrder, ShopifyProductNode, VectorData } from "app/types";
 
 const PINECONE_API_KEY = process.env.PINECONE_API_KEY || "";
 const INDEX_HOST = process.env.INDEX_HOST || "";
-
-interface PineconeNamespaceResponse {
-    namespaces?: {
-        name: string;
-        record_count?: number;
-    }[];
-}
-
-type RawMetadata = Record<string, unknown>;
-
-type PineconeMetadata = Record<string, string | number | boolean | string[]>;
-
-interface PineconeRecord {
-    id: string;
-    values: number[];
-    metadata: RawMetadata;
-}
-
-interface PineconeEmbedResponse {
-    data: { values: number[] }[];
-}
 
 // ============================================================================
 // MAIN EXPORTS
@@ -138,7 +117,7 @@ export const createPineconeNamespace = async (shop: string) => {
 // INTERNAL HELPERS
 // ============================================================================
 
-const generateEmbeddings = async (texts: string[]) => {
+export const generateEmbeddings = async (texts: string[]) => {
     try {
         const response = await fetch("https://api.pinecone.io/embed", {
             method: "POST",
@@ -167,7 +146,7 @@ const generateEmbeddings = async (texts: string[]) => {
     }
 };
 
-const upsertVectors = async (namespace: string, records: PineconeRecord[]) => {
+export const upsertVectors = async (namespace: string, records: PineconeRecord[]) => {
     // Sanitizer: Converts complex objects to JSON strings
     const sanitizeMetadata = (meta: RawMetadata): PineconeMetadata => {
         const clean: PineconeMetadata = {};
@@ -291,10 +270,10 @@ export const deleteVectorFromPinecone = async (namespace: string, vectorId: stri
     }
 };
 
-export const prepareOrderForPinecone = (order: any) => {
+export const prepareOrderForPinecone = (order: SavedOrder): VectorData => {
     // order argument is the result from prisma.order.upsert (includes items and customer)
     
-    const itemNames = order.items.map((i: any) => `${i.quantity}x ${i.productName}`).join(", ");
+    const itemNames = order.items.map((i) => `${i.quantity}x ${i.productName}`).join(", ");
     
     // 1. Text Context: This is what the AI searches against
     const textToEmbed = `

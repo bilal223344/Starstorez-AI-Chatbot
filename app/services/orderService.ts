@@ -1,30 +1,142 @@
-import { PrismaClient, Prisma } from '@prisma/client';
-import { ShopifyCustomerNode } from './customerService';
+import { PrismaClient } from '@prisma/client';
+import { shopifyGraphqlRequest, sleep } from 'app/utils/extra';
+import { checkPineconeNamespace, createPineconeNamespace, generateEmbeddings, prepareOrderForPinecone, upsertVectors } from './pineconeService';
+import { FormattedOrderData, NamespaceCreationResult, PineconeRecord, ShopifyGraphqlResponse, ShopifyOrderNode, ShopifyOrdersResponse, VectorData } from 'app/types';
 
 const prisma = new PrismaClient();
 
-// --- Types ---
-export interface ShopifyOrderNode {
-    id: string;
-    name: string; // Order Number (e.g. #1001)
-    displayFinancialStatus: string;
-    displayFulfillmentStatus: string;
-    totalPriceSet: { shopMoney: { amount: string } };
-    createdAt: string;
-    customer: ShopifyCustomerNode; // Order includes customer details
-    lineItems: {
-        edges: {
-            node: {
-                title: string;
-                quantity: number;
-                sku: string | null;
+
+// --- SYNC ALL ORDERS ---
+export const syncAllOrders = async (shop: string, accessToken: string) => {
+    console.log(`[SYNC] Starting Order Sync for ${shop}`);
+
+    const nsCheck = await checkPineconeNamespace(shop);
+    let namespace = nsCheck.pcNamespace;
+
+    if (!namespace) {
+        // Cast the result to your typed interface
+        const creation = await createPineconeNamespace(shop) as NamespaceCreationResult | null;
+        if (creation?.success) {
+            namespace = creation.pcNamespace;
+        }
+    }
+
+    if (!namespace) throw new Error("Could not setup Pinecone namespace");
+
+
+    let hasNextPage = true;
+    let after: string | null = null;
+    let count = 0;
+
+    const query = `
+        query ($first: Int, $after: String) {
+            orders(first: $first, after: $after, sortKey: CREATED_AT, reverse: true) {
+                edges {
+                    node {
+                        id name displayFinancialStatus displayFulfillmentStatus createdAt
+                        totalPriceSet { shopMoney { amount } }
+                        customer { id email firstName lastName phone createdAt updatedAt }
+                        lineItems(first: 10) {
+                            edges { node { title quantity sku product { id } } }
+                        }
+                    }
+                }
+                pageInfo { hasNextPage endCursor }
             }
-        }[]
-    };
-}
+        }
+    `;
+
+    console.log("[ORDER RESPONSE]")
+
+    while (hasNextPage) {
+        const response = await shopifyGraphqlRequest({
+            shop, accessToken, query, variables: { first: 20, after }
+        }) as ShopifyGraphqlResponse<ShopifyOrdersResponse>;
+
+        console.log("[ORDER RESPONSE]", response.data);
+
+        const nodes: ShopifyOrderNode[] = response.data?.orders?.edges.map((e) => e.node) || [];
+
+        if (nodes.length === 0) break;
+
+
+        const pineconeBatch: VectorData[] = [];
+
+        // Process Batch
+        await Promise.all(nodes.map(async (node: ShopifyOrderNode) => {
+            // A. Save to DB
+            const formatted = formatShopifyOrder(node);
+            const savedOrder = await saveOrderToDB(formatted);
+
+            // B. Prepare for Pinecone
+            if (savedOrder) {
+                // We pass the saved DB object because it contains the internal Customer UUID
+                pineconeBatch.push(prepareOrderForPinecone(savedOrder));
+            }
+        }));
+
+        count += nodes.length;
+        console.log(`[SYNC] Processed ${count} orders...`);
+
+        hasNextPage = response.data?.orders.pageInfo.hasNextPage ?? false;
+        after = response.data?.orders.pageInfo.endCursor ?? null;
+
+        if (hasNextPage) await sleep(500);
+    }
+    return count;
+};
+
+export const syncOrderById = async (shop: string, accessToken: string, orderId: string) => {
+    const query = `
+        query ($id: ID!) {
+            order(id: $id) {
+                id name displayFinancialStatus displayFulfillmentStatus createdAt
+                totalPriceSet { shopMoney { amount } }
+                customer { id email firstName lastName phone createdAt updatedAt }
+                lineItems(first: 20) {
+                    edges { node { title quantity sku product { id } } }
+                }
+            }
+        }
+    `;
+
+    const response = await shopifyGraphqlRequest({
+        shop, accessToken, query, variables: { id: orderId },
+    }) as ShopifyGraphqlResponse<{ order: ShopifyOrderNode }>;
+
+    const orderNode = response.data?.order;
+    if (!orderNode) {
+        console.error(`[SYNC ERROR] Order ${orderId} not found.`);
+        return;
+    }
+
+    // 1. Save to DB
+    const savedOrder = await saveOrderToDB(formatShopifyOrder(orderNode));
+
+    // 2. Sync to Pinecone
+    const nsCheck = await checkPineconeNamespace(shop);
+    if (nsCheck.pcNamespace && savedOrder && savedOrder.items) {
+
+        // Prepare vector data
+        const { textToEmbed, metadata } = prepareOrderForPinecone(savedOrder);
+
+        // Generate Embedding (You need to export generateEmbeddings from pineconeService or move it to a shared util)
+        const vectors = await generateEmbeddings([textToEmbed]);
+
+        const record: PineconeRecord = {
+            id: `shopify_${orderId.split("/").pop()}`,
+            values: vectors[0],
+            metadata: metadata 
+        };
+
+        // Upsert Single Vector
+        await upsertVectors(nsCheck.pcNamespace, [record]);
+        console.log(`[SYNC] Order ${orderNode.name} synced to DB and Pinecone.`);
+    }
+};
 
 // --- Formatter ---
-export const formatShopifyOrder = (node: ShopifyOrderNode) => {
+export const formatShopifyOrder = (node: ShopifyOrderNode): FormattedOrderData => {
     const rawItems = node.lineItems.edges.map(e => e.node);
 
     return {
@@ -38,7 +150,8 @@ export const formatShopifyOrder = (node: ShopifyOrderNode) => {
             create: rawItems.map(item => ({
                 productName: item.title,
                 quantity: item.quantity,
-                sku: item.sku
+                sku: item.sku,
+                productId: item.product?.id || ""
             }))
         },
         // We pass the raw customer to handle the relationship in the DB function
@@ -47,7 +160,7 @@ export const formatShopifyOrder = (node: ShopifyOrderNode) => {
 };
 
 // --- DB Actions ---
-export const saveOrderToDB = async (formattedData: any) => {
+export const saveOrderToDB = async (formattedData: FormattedOrderData) => {
     const { _customerPayload, items, ...orderData } = formattedData;
 
     try {
@@ -55,7 +168,7 @@ export const saveOrderToDB = async (formattedData: any) => {
             where: { shopifyId: orderData.shopifyId },
             create: {
                 ...orderData,
-                items: items, 
+                items: items,
                 customer: {
                     connectOrCreate: {
                         where: { shopifyId: _customerPayload.id },
@@ -76,10 +189,10 @@ export const saveOrderToDB = async (formattedData: any) => {
                     create: items.create
                 }
             },
-            include: { 
+            include: {
                 customer: true,
-                items: true 
-            } 
+                items: true
+            }
         });
     } catch (error) {
         console.error(`[DB Error] Order Sync Failed:`, error);

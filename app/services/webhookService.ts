@@ -1,153 +1,64 @@
 // app/services/webhookService.ts
+import { deleteProductFromDB, syncProductById } from "./productService";
+import { deleteOrderFromDB, syncOrderById } from "./orderService";
+import { deleteCustomerFromDB, syncCustomerById } from "./customerService";
+import { deleteVectorFromPinecone, checkPineconeNamespace } from "./pineconeService";
 
-import { shopifyGraphqlRequest } from "../utils/extra";
-import { formatShopifyProduct, saveProductToDB, deleteProductFromDB, ShopifyProductNode } from "./productService";
-import { batchProcessPinecone, deleteVectorFromPinecone, checkPineconeNamespace, prepareOrderForPinecone } from "./pineconeService";
-import { formatShopifyOrder, saveOrderToDB } from "./orderService";
-import { formatShopifyCustomer, saveCustomerToDB } from "./customerService";
+// ============================================================================
+// PRODUCTS
+// ============================================================================
 
-
-// --- JOB 1: SYNC SINGLE PRODUCT (Create/Update) ---
 export const syncSingleProductJob = async (shop: string, accessToken: string, productId: string) => {
-    console.log(`[JOB] Syncing single product: ${productId}`);
-
-    // 1. Fetch JUST this one product from Shopify
-    // We reuse the exact same query structure so our types match!
-    const query = `
-        query ($id: ID!) {
-            product(id: $id) {
-                id title description vendor productType handle tags createdAt updatedAt
-                featuredImage { url }
-                options { name values }
-                collections(first: 5) { edges { node { title } } }
-                variants(first: 50) {
-                    edges {
-                        node {
-                            id title price sku inventoryQuantity
-                            image { url }
-                            selectedOptions { name value }
-                        }
-                    }
-                }
-            }
-        }
-    `;
-
-    const response = await shopifyGraphqlRequest({
-        shop,
-        accessToken,
-        query,
-        variables: { id: productId },
-    }) as { data: { product: ShopifyProductNode } };
-
-    const product = response.data?.product;
-
-    if (!product) {
-        console.error(`[JOB] Product not found in Shopify: ${productId}`);
-        return;
-    }
-
-    // 2. Save to Local DB (Prisma)
-    const formatted = formatShopifyProduct(product, shop);
-    await saveProductToDB(formatted);
-
-    // 3. Sync to Pinecone
-    // We need the namespace first
-    const nsCheck = await checkPineconeNamespace(shop);
-    if (nsCheck.pcNamespace) {
-        // We reuse your batch function, but pass an array of 1 item
-        await batchProcessPinecone(nsCheck.pcNamespace, [product]);
-        console.log(`[JOB] Successfully synced ${product.title} to Pinecone.`);
-    }
+    console.log(`[WEBHOOK JOB] Syncing Product: ${productId}`);
+    await syncProductById(shop, accessToken, productId);
 };
 
-// --- JOB 2: DELETE PRODUCT ---
 export const deleteProductJob = async (shop: string, productId: string) => {
-    console.log(`[JOB] Deleting product: ${productId}`);
+    console.log(`[WEBHOOK JOB] Deleting Product: ${productId}`);
 
-    // 1. Delete from Local DB
+    // 1. DB Delete
     await deleteProductFromDB(productId);
 
-    // 2. Delete from Pinecone
+    // 2. Pinecone Delete
     const nsCheck = await checkPineconeNamespace(shop);
     if (nsCheck.pcNamespace) {
-        // Pinecone ID format: "shopify_123456789"
-        // We strip the gid prefix to match how we saved it
         const cleanId = `shopify_${productId.split("/").pop()}`;
         await deleteVectorFromPinecone(nsCheck.pcNamespace, cleanId);
     }
 };
 
+// ============================================================================
+// ORDERS
+// ============================================================================
 
-// --- JOB: SYNC ORDER ---
 export const syncOrderJob = async (shop: string, accessToken: string, orderId: string) => {
-    console.log(`[JOB] Syncing Order: ${orderId}`);
+    console.log(`[WEBHOOK JOB] Syncing Order: ${orderId}`);
+    await syncOrderById(shop, accessToken, orderId);
+};
 
-    // 1. Fetch Order from Shopify
-    const query = `
-        query ($id: ID!) {
-            order(id: $id) {
-                id name displayFinancialStatus displayFulfillmentStatus createdAt
-                totalPriceSet { shopMoney { amount } }
-                customer { id email firstName lastName phone createdAt updatedAt }
-                lineItems(first: 20) {
-                    edges { node { title quantity sku } }
-                }
-            }
-        }
-    `;
+export const deleteOrderJob = async (shop: string, orderId: string) => {
+    console.log(`[WEBHOOK JOB] Deleting Order: ${orderId}`);
 
-    const response: any = await shopifyGraphqlRequest({
-        shop, accessToken, query, variables: { id: orderId },
-    });
+    await deleteOrderFromDB(orderId);
 
-    const orderNode = response.data?.order;
-    if (!orderNode) return;
-
-    // 2. Save to DB
-    const formatted = formatShopifyOrder(orderNode);
-    // This returns the full DB object including the connected Customer
-    const savedOrder = await saveOrderToDB(formatted); 
-
-    // 3. Sync to Pinecone
+    // Note: If you sync orders to Pinecone, you should delete them here too:
     const nsCheck = await checkPineconeNamespace(shop);
-    if (nsCheck.pcNamespace && savedOrder) {
-        // Prepare vector specifically for Order
-        const { textToEmbed, metadata } = prepareOrderForPinecone(savedOrder);
-        
-        // We assume your batchProcessPinecone logic is generic enough 
-        // to take { textToEmbed, metadata } or you create a specific `upsertSingleRecord` function.
-        // For simplicity here, let's assume we call a specific upsert helper:
-        
-        // You might need to refactor batchProcessPinecone to accept generic data 
-        // or create a `syncOrderToPinecone` specific function.
-        
-        // Example manual call for single item (concept):
-        /* await upsertVectors(nsCheck.pcNamespace, [{
-               id: `order_${orderId.split("/").pop()}`,
-               values: await generateEmbeddings([textToEmbed]),
-               metadata
-           }])
-        */
-       console.log(`[JOB] Order ${orderNode.name} synced to Pinecone.`);
+    if (nsCheck.pcNamespace) {
+        const cleanId = `shopify_${orderId.split("/").pop()}`;
+        await deleteVectorFromPinecone(nsCheck.pcNamespace, cleanId);
     }
 };
 
-// --- JOB: SYNC CUSTOMER ---
-export const syncCustomerJob = async (shop: string, accessToken: string, customerId: string) => {
-    const query = `
-        query ($id: ID!) {
-            customer(id: $id) {
-                id email firstName lastName phone createdAt updatedAt
-            }
-        }
-    `;
-    
-    const response: any = await shopifyGraphqlRequest({
-        shop, accessToken, query, variables: { id: customerId },
-    });
+// ============================================================================
+// CUSTOMERS
+// ============================================================================
 
-    if (response.data?.customer) {
-        await saveCustomerToDB(formatShopifyCustomer(response.data.customer));
-    }
+export const syncCustomerJob = async (shop: string, accessToken: string, customerId: string) => {
+    console.log(`[WEBHOOK JOB] Syncing Customer: ${customerId}`);
+    await syncCustomerById(shop, accessToken, customerId);
+};
+
+export const deleteCustomerJob = async (shop: string, customerId: string) => {
+    console.log(`[WEBHOOK JOB] Deleting Customer: ${customerId}`);
+    await deleteCustomerFromDB(customerId);
 };

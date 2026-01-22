@@ -98,7 +98,7 @@ model Order {
 
 model OrderItem {
   id          String  @id @default(uuid())
-  ProductId   String
+  productId   String
   productName String
   quantity    Int
   sku         String?
