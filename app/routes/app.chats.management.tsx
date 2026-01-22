@@ -293,8 +293,6 @@ function ChatInterface({
     // Default styling matching ChatbotPreview (from customization defaults)
     const defaultStyles: MasterState = {
         chatWindow: {
-            avatar: "",
-            botName: "Start Store Assistant",
             colorMode: "solid",
             primaryColor: "#D73535",
             gradientStart: "#1CB5E0",
@@ -302,19 +300,24 @@ function ChatInterface({
             secondaryColor: "#FF937E",
             backgroundColor: "#FCF8F8",
             textColor: "#111F35",
+            secondaryTextColor: "#000000",
             fontFamily: "Roboto",
             fontSize: 16,
-            fontWeight: "Regular (400)"
+            fontWeight: "Regular (400)",
+            width: 350,
+            height: 450,
+            borderRadius: 12
         },
         messageBox: {
-            borderRadius: 12,
+            borderRadiusTop: 12,
+            borderRadiusRight: 12,
+            borderRadiusBottom: 12,
+            borderRadiusLeft: 12,
             messageSpacing: 12,
             paddingVertical: 12,
             paddingHorizontal: 14,
             typingStyle: "In the Msg Box",
             typingIndicator: "Dots (animated)",
-            sendIcon: "",
-            sendIconSize: 16,
             timestampDisplay: false
         },
         welcome: {
@@ -324,8 +327,12 @@ function ChatInterface({
             sendOnEnter: false
         },
         topNav: {
+            avatar: "",
+            botName: "Start Store Assistant",
             headerHeight: 60,
             headerContent: "StartStorez",
+            headerFontSize: 15,
+            headerFontWeight: "600",
             showOnlineStatus: true,
             onlineStatusType: "Online",
             customOnlineText: ""
@@ -337,10 +344,34 @@ function ChatInterface({
             zIndex: 2147483647
         },
         btnSize: {
-            size: 60
+            size: 60,
+            launcherIconName: "message-circle",
+            launcherIconSize: 28
         },
         btnAnim: {
-            animationType: "Static"
+            animationType: "Static",
+            transitionDuration: 300
+        },
+        closeButtonAnim: {
+            animationType: "Fade Out",
+            transitionDuration: 300
+        },
+        footer: {
+            backgroundColor: "#FFFFFF",
+            inputTextColor: "#333333",
+            placeholderColor: "#999999",
+            inputFontSize: 14,
+            inputPaddingVertical: 10,
+            inputPaddingHorizontal: 12,
+            borderTopColor: "#EEEEEE",
+            borderRadiusBottom: 12,
+            sendButtonBackgroundColor: "transparent",
+            sendButtonSize: 32,
+            sendButtonBorderRadius: 8,
+            sendButtonIconColor: "#D73535",
+            sendButtonHoverOpacity: 0.9,
+            sendIconName: "send",
+            sendIconSize: 16
         }
     };
 
@@ -351,7 +382,10 @@ function ChatInterface({
 
     // Shared bubble base style (same as ChatbotPreview)
     const bubbleBaseStyle: React.CSSProperties = {
-        borderRadius: `${defaultStyles.messageBox.borderRadius}px`,
+        borderTopLeftRadius: `${defaultStyles.messageBox.borderRadiusTop}px`,
+        borderTopRightRadius: `${defaultStyles.messageBox.borderRadiusRight}px`,
+        borderBottomRightRadius: `${defaultStyles.messageBox.borderRadiusBottom}px`,
+        borderBottomLeftRadius: `${defaultStyles.messageBox.borderRadiusLeft}px`,
         padding: `${defaultStyles.messageBox.paddingVertical}px ${defaultStyles.messageBox.paddingHorizontal}px`,
         marginBottom: `${defaultStyles.messageBox.messageSpacing}px`,
         fontSize: `${defaultStyles.chatWindow.fontSize}px`,
@@ -367,8 +401,7 @@ function ChatInterface({
     const botMessageStyle: React.CSSProperties = {
         ...bubbleBaseStyle,
         background: primaryThemeBackground,
-        color: "#ffffff",
-        borderBottomLeftRadius: "2px",
+        color: defaultStyles.chatWindow.textColor || "#ffffff",
         alignSelf: "flex-start",
     };
 
@@ -376,8 +409,7 @@ function ChatInterface({
     const userMessageStyle: React.CSSProperties = {
         ...bubbleBaseStyle,
         background: defaultStyles.chatWindow.secondaryColor || "#f1f1f1",
-        color: defaultStyles.chatWindow.textColor || "#000000",
-        borderBottomRightRadius: "2px",
+        color: defaultStyles.chatWindow.secondaryTextColor || "#000000",
         alignSelf: "flex-end",
     };
 

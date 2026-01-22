@@ -11,6 +11,12 @@ export default function App() {
           rel="stylesheet"
           href="https://cdn.shopify.com/static/fonts/inter/v4/styles.css"
         />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;700&family=Poppins:wght@300;400;700&family=Roboto:wght@300;400;700&family=Open+Sans:wght@300;400;700&family=Lato:wght@300;400;700&family=Montserrat:wght@300;400;700&family=Raleway:wght@300;400;700&family=Nunito:wght@300;400;700&family=Playfair+Display:wght@400;700&family=Merriweather:wght@300;400;700&family=Source+Sans+Pro:wght@300;400;700&family=Ubuntu:wght@300;400;700&family=Oswald:wght@300;400;700&family=PT+Sans:wght@400;700&family=Noto+Sans:wght@300;400;700&display=swap"
+          rel="stylesheet"
+        />
         <Meta />
         <Links />
       </head>

@@ -2,9 +2,6 @@ import { CallbackEvent } from "@shopify/polaris-types";
 import { useState } from "react";
 
 export interface ChatWindowData {
-    avatar: string;
-    botName: string;
-
     // Primary (Header/Bot)
     colorMode: 'solid' | 'gradient';
     primaryColor: string;
@@ -15,10 +12,14 @@ export interface ChatWindowData {
     secondaryColor: string;
     backgroundColor: string;
     textColor: string;
+    secondaryTextColor: string;
 
     fontFamily: string;
     fontSize: number;
     fontWeight: string;
+    width: number;
+    height: number;
+    borderRadius: number;
 }
 
 interface ChatWindowDesignProps {
@@ -28,7 +29,6 @@ interface ChatWindowDesignProps {
 
 export default function ChatWindowDesign({ data, onUpdate }: ChatWindowDesignProps) {
     const [isOpen, setIsOpen] = useState(false);
-    const [isUploading, setIsUploading] = useState(false);
 
     const aestheticColors = ["#D73535", "#F4E5C2", "#295F4E", "#B2CD9C", "#FA8112", "#6E5034", "#5C6F2B", "#FFD41D", "#005461", "#061E29"];
     const fontColors = ["#111F35", "#ECECEC", "#362F4F", "#FCF8F8", "#222222", "#EDFFF0", "#000000", "#FFF8DE", "#2D3C59", "#EFE9E3", "#1A2A4F"];
@@ -39,59 +39,6 @@ export default function ChatWindowDesign({ data, onUpdate }: ChatWindowDesignPro
         { start: "#fcff9e", end: "#c67700" }, { start: "#d53369", end: "#daae51" },
         { start: "#9ebd13", end: "#008552" }, { start: "#f8ff00", end: "#3ad59f" },
     ];
-    const avatarUrls = [
-        "https://images.unsplash.com/photo-1728577740843-5f29c7586afe?q=80&w=880&auto=format&fit=crop",
-        "https://plus.unsplash.com/premium_photo-1739786996040-32bde1db0610?w=500&auto=format&fit=crop",
-        "https://images.unsplash.com/photo-1750924718670-b7b90abad70a?q=80&w=824&auto=format&fit=crop",
-        "https://plus.unsplash.com/premium_photo-1739786996060-2769f1ded135?q=80&w=880&auto=format&fit=crop",
-        "https://plus.unsplash.com/premium_photo-1739283664366-abb2b1c6f218?q=80&w=1170&auto=format&fit=crop"
-    ];
-
-    const resizeImage = (file: File, maxWidth: number): Promise<string> => {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
-            reader.onload = (event) => {
-                const img = new Image();
-                img.src = event.target?.result as string;
-                img.onload = () => {
-                    const canvas = document.createElement('canvas');
-                    let width = img.width;
-                    let height = img.height;
-                    if (width > maxWidth) {
-                        height *= maxWidth / width;
-                        width = maxWidth;
-                    }
-                    canvas.width = width;
-                    canvas.height = height;
-                    const ctx = canvas.getContext('2d');
-                    ctx?.drawImage(img, 0, 0, width, height);
-                    resolve(canvas.toDataURL('image/jpeg', 0.8));
-                };
-                img.onerror = (err) => reject(err);
-            };
-            reader.onerror = (err) => reject(err);
-        });
-    };
-
-    const handleFileUpload = async (event: CallbackEvent<"s-drop-zone">) => {
-        // Define the shape of the custom element to include 'files'
-        // This tells TypeScript: "Treat this target as an HTMLElement that definitely has a files array"
-        const target = event.currentTarget as HTMLElement & { files: File[] };
-        const files = target.files;
-
-        if (files && files.length > 0) {
-            setIsUploading(true);
-            try {
-                const compressedImage = await resizeImage(files[0], 250);
-                onUpdate("avatar", compressedImage);
-            } catch (error) {
-                console.error("Error resizing image:", error);
-            } finally {
-                setIsUploading(false);
-            }
-        }
-    };
 
     const handleGradientSelect = (start: string, end: string) => {
         onUpdate("gradientStart", start);
@@ -113,37 +60,7 @@ export default function ChatWindowDesign({ data, onUpdate }: ChatWindowDesignPro
                     <s-stack padding="none base base" gap="base">
                         <s-stack gap="base">
 
-                            {/* 1. Chatbot Avatar */}
-                            <s-box>
-                                <s-heading>Chatbot Avatar</s-heading>
-                                <s-stack direction="inline" gap="small" alignItems="center" paddingBlockStart="small-200">
-                                    <s-box borderRadius="large-200" inlineSize="50px" blockSize="auto">
-                                        <s-drop-zone label={isUploading ? "..." : ""} accept=".jpg,.png,.gif" onInput={handleFileUpload} />
-                                    </s-box>
-                                    {avatarUrls.map((url, index) => (
-                                        <button key={index} onClick={() => onUpdate("avatar", url)} style={{ width: "50px", height: "50px", overflow: "hidden", borderRadius: "999px", cursor: "pointer", border: data.avatar === url ? "2px solid blue" : "1px solid #dee3ed", padding: 0, backgroundColor: "black" }}>
-                                            <img style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="Avatar" src={url} />
-                                        </button>
-                                    ))}
-                                    {data.avatar && !avatarUrls.includes(data.avatar) && (
-                                        <div style={{ width: "50px", height: "50px", overflow: "hidden", borderRadius: "999px", border: "2px solid blue" }}>
-                                            <img src={data.avatar} alt="Custom" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                                        </div>
-                                    )}
-                                </s-stack>
-                            </s-box>
-
-                            {/* 2. Chatbot Name */}
-                            <s-box>
-                                <s-heading>Chatbot Name</s-heading>
-                                <s-stack direction="inline" gap="small" alignItems="center" paddingBlockStart="small-200">
-                                    <s-box>
-                                        <s-text-field value={data.botName} onInput={(e: CallbackEvent<"s-text-field">) => onUpdate("botName", e.currentTarget.value)} maxLength={30} minLength={3} />
-                                    </s-box>
-                                </s-stack>
-                            </s-box>
-
-                            {/* 3. Chatbot Color (Primary) */}
+                            {/* 1. Chatbot Color (Primary) */}
                             <s-box border="base base dashed" borderRadius="base" padding="small" background="subdued">
                                 <s-heading>Chatbot Color</s-heading>
                                 <s-stack direction="block" gap="small" paddingBlockStart="small-200">
@@ -209,9 +126,9 @@ export default function ChatWindowDesign({ data, onUpdate }: ChatWindowDesignPro
                                 </s-stack>
                             </s-box>
 
-                            {/* 6. Text Color (Added to replace MessageBox logic) */}
+                            {/* 6. Primary Text Color (Added to replace MessageBox logic) */}
                             <s-box border="base base dashed" borderRadius="base" padding="small" background="subdued">
-                                <s-heading>Text Color</s-heading>
+                                <s-heading>Primary Text Color</s-heading>
                                 <s-stack direction="block" gap="small" paddingBlockStart="small-200">
                                     <s-box>
                                         <s-color-field placeholder="Select a color" value={data.textColor} onChange={(e: CallbackEvent<"s-color-field">) => onUpdate("textColor", e.currentTarget.value)} />
@@ -224,23 +141,83 @@ export default function ChatWindowDesign({ data, onUpdate }: ChatWindowDesignPro
                                 </s-stack>
                             </s-box>
 
-                            {/* 7. Font Settings */}
+                            {/* 7. Secondary Text Color */}
+                            <s-box border="base base dashed" borderRadius="base" padding="small" background="subdued">
+                                <s-heading>Secondary Text Color</s-heading>
+                                <s-stack direction="block" gap="small" paddingBlockStart="small-200">
+                                    <s-box>
+                                        <s-color-field placeholder="Select a color" value={data.secondaryTextColor} onChange={(e: CallbackEvent<"s-color-field">) => onUpdate("secondaryTextColor", e.currentTarget.value)} />
+                                        <s-stack direction="inline" gap="small" alignItems="center" paddingBlockStart="small">
+                                            {fontColors.map((color) => (
+                                                <button key={color} onClick={() => onUpdate("secondaryTextColor", color)} style={{ width: "40px", height: "40px", background: color, boxShadow: "rgba(0, 0, 0, 0.12) 0px 1px 3px", borderRadius: "999px", cursor: "pointer", border: data.secondaryTextColor === color ? "2px solid black" : "none" }} />
+                                            ))}
+                                        </s-stack>
+                                    </s-box>
+                                </s-stack>
+                            </s-box>
+
+                            {/* 8. Font Settings */}
                             <s-box>
                                 <s-grid gridTemplateColumns="1fr 1fr" gap="small" alignItems="center" paddingBlockStart="small-200">
                                     <s-select label="Font family" value={data.fontFamily} onChange={(e: CallbackEvent<"s-select">) => onUpdate("fontFamily", e.currentTarget.value)}>
-                                        <s-option value="Inter">Inter</s-option>
-                                        <s-option value="Poppins">Poppins</s-option>
-                                        <s-option value="Roboto">Roboto</s-option>
+                                        <s-option value="Inter"><span style={{fontFamily: "Inter, sans-serif"}}>Inter</span></s-option>
+                                        <s-option value="Poppins"><span style={{fontFamily: "Poppins, sans-serif"}}>Poppins</span></s-option>
+                                        <s-option value="Roboto"><span style={{fontFamily: "Roboto, sans-serif"}}>Roboto</span></s-option>
+                                        <s-option value="Open Sans"><span style={{fontFamily: '"Open Sans", sans-serif'}}>Open Sans</span></s-option>
+                                        <s-option value="Lato"><span style={{fontFamily: "Lato, sans-serif"}}>Lato</span></s-option>
+                                        <s-option value="Montserrat"><span style={{fontFamily: "Montserrat, sans-serif"}}>Montserrat</span></s-option>
+                                        <s-option value="Raleway"><span style={{fontFamily: "Raleway, sans-serif"}}>Raleway</span></s-option>
+                                        <s-option value="Nunito"><span style={{fontFamily: "Nunito, sans-serif"}}>Nunito</span></s-option>
+                                        <s-option value="Playfair Display"><span style={{fontFamily: '"Playfair Display", sans-serif'}}>Playfair Display</span></s-option>
+                                        <s-option value="Merriweather"><span style={{fontFamily: "Merriweather, sans-serif"}}>Merriweather</span></s-option>
+                                        <s-option value="Source Sans Pro"><span style={{fontFamily: '"Source Sans Pro", sans-serif'}}>Source Sans Pro</span></s-option>
+                                        <s-option value="Ubuntu"><span style={{fontFamily: "Ubuntu, sans-serif"}}>Ubuntu</span></s-option>
+                                        <s-option value="Oswald"><span style={{fontFamily: "Oswald, sans-serif"}}>Oswald</span></s-option>
+                                        <s-option value="PT Sans"><span style={{fontFamily: '"PT Sans", sans-serif'}}>PT Sans</span></s-option>
+                                        <s-option value="Noto Sans"><span style={{fontFamily: '"Noto Sans", sans-serif'}}>Noto Sans</span></s-option>
                                     </s-select>
                                     <s-number-field label="Font Size" value={data.fontSize.toString()} onInput={(e: CallbackEvent<"s-number-field">) => onUpdate("fontSize", Number(e.currentTarget.value))} min={12} max={18} suffix="px" />
                                 </s-grid>
                                 <s-box paddingBlockStart="small">
                                     <s-select label="Font Weight" value={data.fontWeight} onChange={(e: CallbackEvent<"s-select">) => onUpdate("fontWeight", e.currentTarget.value)}>
-                                        <s-option value="300">Light (300)</s-option>
-                                        <s-option value="400">Regular (400)</s-option>
-                                        <s-option value="700">Bold (700)</s-option>
+                                        <s-option value="300"><span style={{fontWeight: 300}}>Light (300)</span></s-option>
+                                        <s-option value="400"><span style={{fontWeight: 400}}>Regular (400)</span></s-option>
+                                        <s-option value="700"><span style={{fontWeight: 700}}>Bold (700)</span></s-option>
                                     </s-select>
                                 </s-box>
+                            </s-box>
+
+                            {/* 9. Window Size & Border Radius */}
+                            <s-box border="base base dashed" borderRadius="base" padding="small" background="subdued">
+                                <s-heading>Window Size & Border Radius</s-heading>
+                                <s-stack direction="block" gap="small" paddingBlockStart="small-200">
+                                    <s-grid gridTemplateColumns="1fr 1fr" gap="small">
+                                        <s-number-field
+                                            label="Width"
+                                            value={data.width.toString()}
+                                            min={280}
+                                            max={600}
+                                            suffix="px"
+                                            onInput={(e: CallbackEvent<"s-number-field">) => onUpdate("width", Number(e.currentTarget.value))}
+                                        />
+                                        <s-number-field
+                                            label="Height"
+                                            value={data.height.toString()}
+                                            min={300}
+                                            max={800}
+                                            suffix="px"
+                                            onInput={(e: CallbackEvent<"s-number-field">) => onUpdate("height", Number(e.currentTarget.value))}
+                                        />
+                                    </s-grid>
+                                    <s-number-field
+                                        label="Border Radius"
+                                        value={data.borderRadius.toString()}
+                                        min={0}
+                                        max={30}
+                                        suffix="px"
+                                        onInput={(e: CallbackEvent<"s-number-field">) => onUpdate("borderRadius", Number(e.currentTarget.value))}
+                                    />
+                                </s-stack>
                             </s-box>
 
                         </s-stack>

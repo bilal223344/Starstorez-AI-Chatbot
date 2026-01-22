@@ -1,9 +1,22 @@
 import { CallbackEvent } from "@shopify/polaris-types";
 import { useState } from "react";
+import {
+    IconMessageCircle,
+    IconMessage,
+    IconMessage2,
+    IconMessageDots,
+    IconHeadset,
+    IconBulb,
+    IconHelp,
+    IconMoodSmile,
+    IconPhone
+} from "@tabler/icons-react";
 
 // --- Types ---
 export interface ButtonSizeData {
     size: number;
+    launcherIconName: string;
+    launcherIconSize: number;
 }
 
 interface ButtonSizeOptionsProps {
@@ -16,6 +29,18 @@ export default function ButtonSizeOptions({ data, onUpdate }: ButtonSizeOptionsP
 
     // Preset options
     const presets = [48, 60, 72];
+
+    const launcherIconOptions = [
+        { name: "message-circle", label: "Message Circle", icon: IconMessageCircle },
+        { name: "message", label: "Message", icon: IconMessage },
+        { name: "message2", label: "Message 2", icon: IconMessage2 },
+        { name: "message-dots", label: "Message Dots", icon: IconMessageDots },
+        { name: "headset", label: "Headset", icon: IconHeadset },
+        { name: "bulb", label: "Bulb", icon: IconBulb },
+        { name: "help", label: "Help", icon: IconHelp },
+        { name: "mood-smile", label: "Mood Smile", icon: IconMoodSmile },
+        { name: "phone", label: "Phone", icon: IconPhone }
+    ];
 
     return (
         <>
@@ -74,7 +99,7 @@ export default function ButtonSizeOptions({ data, onUpdate }: ButtonSizeOptionsP
                                     </s-box>
                                     <s-stack gap="small-200">
                                         <s-heading>Custom Size</s-heading>
-                                        <s-grid gridTemplateColumns="auto auto 1fr" gap="base">
+                                        <s-grid gridTemplateColumns="1fr 1fr 1fr 1fr" gap="base">
                                             {/* Read-only preview showing W x H */}
                                             <s-text-field
                                                 value={`${data.size}x${data.size}`}
@@ -94,6 +119,52 @@ export default function ButtonSizeOptions({ data, onUpdate }: ButtonSizeOptionsP
                                         <s-paragraph>Width may be adjusted automatically to fit the label.</s-paragraph>
                                     </s-stack>
                                 </s-stack>
+
+                                {/* Launcher Button Icon */}
+                                <s-box border="base base dashed" borderRadius="base" padding="small" background="subdued">
+                                    <s-heading>Launcher Button Icon</s-heading>
+                                    <s-stack direction="block" gap="small" paddingBlockStart="small-200">
+                                        <s-stack direction="inline" gap="small" alignItems="center" paddingBlockStart="small-200">
+                                            {launcherIconOptions.map((option) => {
+                                                const IconComponent = option.icon;
+                                                return (
+                                                    <button
+                                                        key={option.name}
+                                                        type="button"
+                                                        onClick={() => onUpdate("launcherIconName", option.name)}
+                                                        style={{
+                                                            width: "50px",
+                                                            height: "50px",
+                                                            display: "flex",
+                                                            alignItems: "center",
+                                                            justifyContent: "center",
+                                                            cursor: "pointer",
+                                                            border: data.launcherIconName === option.name ? "2px solid #2C6ECB" : "1px solid #dee3ed",
+                                                            borderRadius: "8px",
+                                                            padding: 0,
+                                                            background: data.launcherIconName === option.name ? "#f0f0f0" : "transparent",
+                                                            transition: "all 0.2s"
+                                                        }}
+                                                        title={option.label}
+                                                        aria-label={`Select ${option.label} icon`}
+                                                    >
+                                                        <IconComponent size={24} color="#333" />
+                                                    </button>
+                                                );
+                                            })}
+                                        </s-stack>
+                                        <s-box paddingBlockStart="small">
+                                            <s-number-field
+                                                label="Icon Size"
+                                                value={data.launcherIconSize.toString()}
+                                                min={12}
+                                                max={48}
+                                                suffix="px"
+                                                onInput={(e: CallbackEvent<"s-number-field">) => onUpdate("launcherIconSize", Number(e.currentTarget.value))}
+                                            />
+                                        </s-box>
+                                    </s-stack>
+                                </s-box>
                             </s-stack>
                         </s-stack>
                     </>

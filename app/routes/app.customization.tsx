@@ -1,21 +1,21 @@
 import ChatbotPreview from "app/components/ChatbotPreview";
 import {
     ButtonAnimations,
+    CloseButtonAnimations,
     ChatWindowDesign,
     ButtonSizeOptions,
+    FooterStyling,
     MessageBoxStyling,
     TopNavigationStyling,
     PositionAndSizeSettings,
-    WelcomeAndGreetingSettings
+    WelcomeAndGreetingSettings,
+    PresetTemplates
 } from "app/components/CustomizationAndAppearance/index"
 import { useState } from "react";
 
 
 export interface MasterState {
     chatWindow: {
-        avatar: string;
-        botName: string;
-
         // --- 1. Primary (Header + Bot Bubble) ---
         colorMode: 'solid' | 'gradient';
         primaryColor: string;
@@ -31,21 +31,27 @@ export interface MasterState {
         // --- 4. Text Color ---
         textColor: string;
 
+        // --- 5. Secondary Text Color ---
+        secondaryTextColor: string;
+
         fontFamily: string;
         fontSize: number;
         fontWeight: string;
+        width: number;
+        height: number;
+        borderRadius: number;
     };
     messageBox: {
-        borderRadius: number;
+        borderRadiusTop: number;
+        borderRadiusRight: number;
+        borderRadiusBottom: number;
+        borderRadiusLeft: number;
         messageSpacing: number;
         paddingVertical: number;
         paddingHorizontal: number;
 
         typingStyle: string;
         typingIndicator: string;
-
-        sendIcon: string;
-        sendIconSize: number;
 
         timestampDisplay: boolean;
     };
@@ -56,8 +62,12 @@ export interface MasterState {
         sendOnEnter: boolean;
     };
     topNav: {
+        avatar: string;
+        botName: string;
         headerHeight: number;
         headerContent: string;
+        headerFontSize: number;
+        headerFontWeight: string;
         showOnlineStatus: boolean;
         onlineStatusType: string; // 'Online' | 'Active' | 'Available' | 'Custom'
         customOnlineText: string;
@@ -70,20 +80,42 @@ export interface MasterState {
     };
     btnSize: {
         size: number;
+        launcherIconName: string;
+        launcherIconSize: number;
     };
     btnAnim: {
-        animationType: string; 
+        animationType: string;
+        transitionDuration: number;
     };
-    // ... add other sections
+    closeButtonAnim: {
+        animationType: string;
+        transitionDuration: number;
+    };
+    footer: {
+        backgroundColor: string;
+        inputTextColor: string;
+        placeholderColor: string;
+        inputFontSize: number;
+        inputPaddingVertical: number;
+        inputPaddingHorizontal: number;
+        borderTopColor: string;
+        borderRadiusBottom: number;
+        sendButtonBackgroundColor: string;
+        sendButtonSize: number;
+        sendButtonBorderRadius: number;
+        sendButtonIconColor: string;
+        sendButtonHoverOpacity: number;
+        sendIconName: string;
+        sendIconSize: number;
+    };
 }
 
 
 export default function Customization() {
+    const [presetKey, setPresetKey] = useState(0);
 
     const [formData, setFormData] = useState<MasterState>({
         chatWindow: {
-            avatar: "",
-            botName: "Start Store Assistant",
             colorMode: "solid",
             primaryColor: "#D73535",
             gradientStart: "#1CB5E0",
@@ -92,19 +124,24 @@ export default function Customization() {
             secondaryColor: "#FF937E",
             backgroundColor: "#FCF8F8",
             textColor: "#111F35",
+            secondaryTextColor: "#000000",
             fontFamily: "Roboto",
             fontSize: 16,
-            fontWeight: "Regular (400)"
+            fontWeight: "Regular (400)",
+            width: 350,
+            height: 450,
+            borderRadius: 12
         },
         messageBox: {
-            borderRadius: 12,
+            borderRadiusTop: 12,
+            borderRadiusRight: 12,
+            borderRadiusBottom: 12,
+            borderRadiusLeft: 12,
             messageSpacing: 12,
             paddingVertical: 12,
             paddingHorizontal: 14,
             typingStyle: "In the Msg Box",
             typingIndicator: "Dots (animated)",
-            sendIcon: "",
-            sendIconSize: 16,
             timestampDisplay: false
         },
         welcome: {
@@ -118,8 +155,12 @@ export default function Customization() {
             sendOnEnter: false
         },
         topNav: {
+            avatar: "",
+            botName: "Start Store Assistant",
             headerHeight: 60,
             headerContent: "StartStorez",
+            headerFontSize: 15,
+            headerFontWeight: "600",
             showOnlineStatus: true,
             onlineStatusType: "Online",
             customOnlineText: ""
@@ -131,10 +172,34 @@ export default function Customization() {
             zIndex: 2147483647
         },
         btnSize: {
-            size: 60
+            size: 60,
+            launcherIconName: "message-circle",
+            launcherIconSize: 28
         },
         btnAnim: {
-            animationType: "Static"
+            animationType: "Static",
+            transitionDuration: 300
+        },
+        closeButtonAnim: {
+            animationType: "Fade Out",
+            transitionDuration: 300
+        },
+        footer: {
+            backgroundColor: "#FFFFFF",
+            inputTextColor: "#333333",
+            placeholderColor: "#999999",
+            inputFontSize: 14,
+            inputPaddingVertical: 10,
+            inputPaddingHorizontal: 12,
+            borderTopColor: "#EEEEEE",
+            borderRadiusBottom: 12,
+            sendButtonBackgroundColor: "transparent",
+            sendButtonSize: 32,
+            sendButtonBorderRadius: 8,
+            sendButtonIconColor: "#D73535",
+            sendButtonHoverOpacity: 0.9,
+            sendIconName: "send",
+            sendIconSize: 16
         }
     });
 
@@ -151,10 +216,19 @@ export default function Customization() {
         console.log(`Updated ${section}.${key} to:`, value);
     };
 
+    const handleApplyPreset = (preset: MasterState) => {
+        setFormData(preset);
+        setPresetKey(prev => prev + 1); // Force re-render of ChatbotPreview
+        console.log("Applied preset:", preset.chatWindow.primaryColor);
+    };
+
     return (
         <s-page heading="Customization & Appearance" inlineSize="large">
             <s-grid gridTemplateColumns="8fr 5fr" gap="large">
                 <s-stack gap="base">
+
+                    {/* Design Presets - Top of page */}
+                    <PresetTemplates onApplyPreset={handleApplyPreset} />
 
                     {/* Chat Window Design */}
                     <ChatWindowDesign
@@ -169,6 +243,11 @@ export default function Customization() {
                         onUpdate={(key, val) => handleUpdate("messageBox", key, val)}
                     />
 
+                    {/* Footer Styling */}
+                    <FooterStyling
+                        data={formData.footer}
+                        onUpdate={(key, val) => handleUpdate("footer", key, val)}
+                    />
 
                     {/* Welcome & Greeting Settings */}
                     <WelcomeAndGreetingSettings
@@ -201,6 +280,16 @@ export default function Customization() {
                     <ButtonAnimations
                         data={formData.btnAnim}
                         onUpdate={(key, val) => handleUpdate("btnAnim", key, val)}
+                        primaryColor={formData.chatWindow.primaryColor}
+                        colorMode={formData.chatWindow.colorMode}
+                        gradientStart={formData.chatWindow.gradientStart}
+                        gradientEnd={formData.chatWindow.gradientEnd}
+                    />
+
+                    {/* Close Button Animations */}
+                    <CloseButtonAnimations
+                        data={formData.closeButtonAnim}
+                        onUpdate={(key, val) => handleUpdate("closeButtonAnim", key, val)}
                     />
 
                 </s-stack>
@@ -208,14 +297,14 @@ export default function Customization() {
                 {/* Widget Customize Preview */}
                 <s-stack>
                     <div style={{ position: 'relative' }}>
-                        <div style={{ width: "100%", flex: "1", position: 'fixed', top: '1px', zIndex: 10 }}>
+                        <div style={{flex: "1", width: "100%", position: 'fixed', top: '1px', zIndex: 10 }}>
                             <s-box padding="none">
                                 <s-stack padding="small-200">
                                     <s-heading>Live Preview</s-heading>
                                 </s-stack>
 
 
-                                <ChatbotPreview data={formData} />
+                                <ChatbotPreview key={presetKey} data={formData} />
 
                             </s-box>
                         </div>
