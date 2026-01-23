@@ -160,7 +160,7 @@ export default function ChatbotPreview({ data }: ChatbotPreviewProps) {
     const handleClose = () => {
         setIsClosing(true);
         const duration = closeButtonAnim.transitionDuration || 300;
-        
+
         setTimeout(() => {
             setIsChatOpen(false);
             setIsClosing(false);
@@ -174,10 +174,10 @@ export default function ChatbotPreview({ data }: ChatbotPreviewProps) {
     // Get animation styles based on selected animation type
     const getCloseAnimationStyle = (): React.CSSProperties => {
         if (!isClosing) return {};
-        
+
         const duration = closeButtonAnim.transitionDuration || 300;
         const transition = `all ${duration}ms ease`;
-        
+
         switch (closeButtonAnim.animationType) {
             case "Fade Out":
                 return {
@@ -223,7 +223,7 @@ export default function ChatbotPreview({ data }: ChatbotPreviewProps) {
     return (
         <div style={{
             width: "100%",
-            height: "600px",
+            height: `${chatWindow.height + 150}px`,
             backgroundColor: "#e5e5e5",
             position: "relative",
             borderRadius: "12px",
@@ -233,174 +233,174 @@ export default function ChatbotPreview({ data }: ChatbotPreviewProps) {
 
             {/* --- CHAT WINDOW CONTAINER --- */}
             {isChatOpen && (
-            <div style={{
-                position: "absolute",
-                bottom: `${position.marginBottom + btnSize.size + 20}px`,
-                [position.chatButtonPosition === "Left corner" ? "left" : "right"]: `${position.marginRight}px`,
-                width: `${chatWindow.width}px`,
-                maxWidth: "calc(100vw - 40px)",
-                height: `${chatWindow.height}px`,
-                maxHeight: "calc(100vh - 120px)",
-                backgroundColor: chatWindow.backgroundColor || "#ffffff", // Uses Background color from ChatWindow settings
-                borderRadius: `${chatWindow.borderRadius}px`,
-                boxShadow: "0 5px 20px rgba(0,0,0,0.15)",
-                display: "flex",
-                flexDirection: "column",
-                zIndex: position.zIndex,
-                fontFamily: getFontFamily(chatWindow.fontFamily),
-                overflow: "hidden",
-                ...(isClosing ? getCloseAnimationStyle() : {})
-            }}>
+                <div style={{
+                    position: "absolute",
+                    bottom: `${position.marginBottom + btnSize.size + 20}px`,
+                    [position.chatButtonPosition === "Left corner" ? "left" : "right"]: `${position.marginRight}px`,
+                    width: `${chatWindow.width}px`,
+                    maxWidth: "calc(100vw - 40px)",
+                    height: `${chatWindow.height}px`,
+                    maxHeight: "calc(100vh - 120px)",
+                    backgroundColor: chatWindow.backgroundColor || "#ffffff", // Uses Background color from ChatWindow settings
+                    borderRadius: `${chatWindow.borderRadius}px`,
+                    boxShadow: "0 5px 20px rgba(0,0,0,0.15)",
+                    display: "flex",
+                    flexDirection: "column",
+                    zIndex: position.zIndex,
+                    fontFamily: getFontFamily(chatWindow.fontFamily),
+                    overflow: "hidden",
+                    ...(isClosing ? getCloseAnimationStyle() : {})
+                }}>
 
-                {/* 1. Header */}
-                <div style={headerStyle}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        {topNav.avatar && (
-                            <img
-                                src={topNav.avatar}
-                                alt="Bot"
-                                style={{ width: "35px", height: "35px", borderRadius: "50%", objectFit: "cover", border: "2px solid rgba(255,255,255,0.2)" }}
-                            />
-                        )}
-                        <div style={{ lineHeight: '1.2' }}>
-                            <div style={{ fontWeight: topNav.headerFontWeight || "600", fontSize: `${topNav.headerFontSize || 15}px` }}>{topNav.botName}</div>
-                            {topNav.showOnlineStatus && (
-                                <div style={{ fontSize: "11px", opacity: 0.9, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                    <span style={{ width: 6, height: 6, background: '#44b700', borderRadius: '50%', boxShadow: "0 0 4px #44b700" }}></span>
-                                    {topNav.onlineStatusType === "Custom" ? topNav.customOnlineText : topNav.onlineStatusType}
-                                </div>
+                    {/* 1. Header */}
+                    <div style={headerStyle}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            {topNav.avatar && (
+                                <img
+                                    src={topNav.avatar}
+                                    alt="Bot"
+                                    style={{ width: "35px", height: "35px", borderRadius: "50%", objectFit: "cover", border: "2px solid rgba(255,255,255,0.2)" }}
+                                />
+                            )}
+                            <div style={{ lineHeight: '1.2' }}>
+                                <div style={{ fontWeight: topNav.headerFontWeight || "600", fontSize: `${topNav.headerFontSize || 15}px` }}>{topNav.botName}</div>
+                                {topNav.showOnlineStatus && (
+                                    <div style={{ fontSize: "11px", opacity: 0.9, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                        <span style={{ width: 6, height: 6, background: '#44b700', borderRadius: '50%', boxShadow: "0 0 4px #44b700" }}></span>
+                                        {topNav.onlineStatusType === "Custom" ? topNav.customOnlineText : topNav.onlineStatusType}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                            <button
+                                type="button"
+                                style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', padding: '4px' }}
+                                onClick={handleClose}
+                                title="Minimize"
+                                aria-label="Minimize chat"
+                            >
+                                <IconMinus size={18} color={chatWindow.textColor || "#fff"} />
+                            </button>
+                            <button
+                                type="button"
+                                style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', padding: '4px' }}
+                                onClick={handleClose}
+                                title="Close"
+                                aria-label="Close chat"
+                            >
+                                <IconX size={18} color={chatWindow.textColor || "#fff"} />
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* 2. Chat Body */}
+                    <div style={{ flex: 1, padding: "20px", overflowY: "auto", display: "flex", flexDirection: "column" }}>
+
+                        {/* Bot Greeting */}
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', width: '100%' }}>
+                            <div style={botMessageStyle}>
+                                {welcome.greeting || "Hello! How can I help?"}
+                            </div>
+                            {messageBox.timestampDisplay && (
+                                <span style={{ fontSize: '10px', color: '#999', marginLeft: 5, marginBottom: 10 }}>10:30 AM</span>
                             )}
                         </div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                        <button 
-                            type="button"
-                            style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', padding: '4px' }}
-                            onClick={handleClose}
-                            title="Minimize"
-                            aria-label="Minimize chat"
-                        >
-                            <IconMinus size={18} color={chatWindow.textColor || "#fff"} />
-                        </button>
-                        <button 
-                            type="button"
-                            style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', padding: '4px' }}
-                            onClick={handleClose}
-                            title="Close"
-                            aria-label="Close chat"
-                        >
-                            <IconX size={18} color={chatWindow.textColor || "#fff"} />
-                        </button>
-                    </div>
-                </div>
 
-                {/* 2. Chat Body */}
-                <div style={{ flex: 1, padding: "20px", overflowY: "auto", display: "flex", flexDirection: "column" }}>
-
-                    {/* Bot Greeting */}
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', width: '100%' }}>
-                        <div style={botMessageStyle}>
-                            {welcome.greeting || "Hello! How can I help?"}
+                        {/* Simulated User Message */}
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', width: '100%', marginTop: '10px' }}>
+                            <div style={userMessageStyle}>
+                                Hi! I&apos;m looking for the best sellers.
+                            </div>
+                            {messageBox.timestampDisplay && (
+                                <span style={{ fontSize: '10px', color: '#999', marginRight: 5, marginBottom: 10 }}>10:31 AM</span>
+                            )}
                         </div>
-                        {messageBox.timestampDisplay && (
-                            <span style={{ fontSize: '10px', color: '#999', marginLeft: 5, marginBottom: 10 }}>10:30 AM</span>
+
+                        {/* Typing Indicator */}
+                        {messageBox.typingIndicator !== "None" && (
+                            <div style={{ ...botMessageStyle, width: 'fit-content', marginTop: 10, padding: '8px 16px' }}>
+                                {messageBox.typingIndicator === "Dots (animated)" ? "•••" : "AI is typing..."}
+                            </div>
                         )}
-                    </div>
 
-                    {/* Simulated User Message */}
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', width: '100%', marginTop: '10px' }}>
-                        <div style={userMessageStyle}>
-                            Hi! I&apos;m looking for the best sellers.
+                        {/* Quick Questions (Chips) */}
+                        <div style={{ marginTop: 'auto', display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'flex-end', paddingTop: '10px' }}>
+                            {welcome.quickQuestions.map((q, i) => (
+                                <button key={i} style={{
+                                    background: "rgba(0,0,0,0.03)", // Subtle background
+                                    border: `1px solid ${chatWindow.primaryColor}`, // Border matches theme
+                                    color: chatWindow.primaryColor, // Text matches theme
+                                    padding: "8px 12px",
+                                    borderRadius: "20px",
+                                    fontSize: "12px",
+                                    fontWeight: 500,
+                                    cursor: "pointer",
+                                    transition: "all 0.2s",
+                                    fontFamily: getFontFamily(chatWindow.fontFamily)
+                                }}>
+                                    {q}
+                                </button>
+                            ))}
                         </div>
-                        {messageBox.timestampDisplay && (
-                            <span style={{ fontSize: '10px', color: '#999', marginRight: 5, marginBottom: 10 }}>10:31 AM</span>
-                        )}
                     </div>
 
-                    {/* Typing Indicator */}
-                    {messageBox.typingIndicator !== "None" && (
-                        <div style={{ ...botMessageStyle, width: 'fit-content', marginTop: 10, padding: '8px 16px' }}>
-                            {messageBox.typingIndicator === "Dots (animated)" ? "•••" : "AI is typing..."}
-                        </div>
-                    )}
-
-                    {/* Quick Questions (Chips) */}
-                    <div style={{ marginTop: 'auto', display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'flex-end', paddingTop: '10px' }}>
-                        {welcome.quickQuestions.map((q, i) => (
-                            <button key={i} style={{
-                                background: "rgba(0,0,0,0.03)", // Subtle background
-                                border: `1px solid ${chatWindow.primaryColor}`, // Border matches theme
-                                color: chatWindow.primaryColor, // Text matches theme
-                                padding: "8px 12px",
-                                borderRadius: "20px",
-                                fontSize: "12px",
-                                fontWeight: 500,
-                                cursor: "pointer",
-                                transition: "all 0.2s",
-                                fontFamily: getFontFamily(chatWindow.fontFamily)
-                            }}>
-                                {q}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-
-                {/* 3. Footer Input */}
-                <div className="chat-preview-footer" style={{
-                    padding: `${footer.inputPaddingVertical}px ${footer.inputPaddingHorizontal}px`,
-                    borderTop: `1px solid ${footer.borderTopColor}`,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "10px",
-                    background: footer.backgroundColor,
-                    borderBottomLeftRadius: `${footer.borderRadiusBottom}px`,
-                    borderBottomRightRadius: `${footer.borderRadiusBottom}px`
-                }}>
-                    <style>{`
+                    {/* 3. Footer Input */}
+                    <div className="chat-preview-footer" style={{
+                        padding: `${footer.inputPaddingVertical}px ${footer.inputPaddingHorizontal}px`,
+                        borderTop: `1px solid ${footer.borderTopColor}`,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                        background: footer.backgroundColor,
+                        borderBottomLeftRadius: `${footer.borderRadiusBottom}px`,
+                        borderBottomRightRadius: `${footer.borderRadiusBottom}px`
+                    }}>
+                        <style>{`
                         .chat-preview-footer input::placeholder { color: ${footer.placeholderColor}; }
                     `}</style>
-                    <input
-                        type="text"
-                        placeholder={welcome.inputPlaceholder}
-                        readOnly
-                        style={{
-                            flex: 1,
-                            border: "none",
-                            outline: "none",
-                            background: "transparent",
-                            fontSize: `${footer.inputFontSize}px`,
-                            fontFamily: getFontFamily(chatWindow.fontFamily),
-                            color: footer.inputTextColor
-                        }}
-                    />
+                        <input
+                            type="text"
+                            placeholder={welcome.inputPlaceholder}
+                            readOnly
+                            style={{
+                                flex: 1,
+                                border: "none",
+                                outline: "none",
+                                background: "transparent",
+                                fontSize: `${footer.inputFontSize}px`,
+                                fontFamily: getFontFamily(chatWindow.fontFamily),
+                                color: footer.inputTextColor
+                            }}
+                        />
 
-                    <button
-                        type="button"
-                        style={{
-                            cursor: "pointer",
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            background: footer.sendButtonBackgroundColor === "transparent" ? "transparent" : footer.sendButtonBackgroundColor,
-                            border: "none",
-                            borderRadius: `${footer.sendButtonBorderRadius}px`,
-                            width: `${footer.sendButtonSize}px`,
-                            height: `${footer.sendButtonSize}px`,
-                            padding: 0,
-                            opacity: footer.sendButtonHoverOpacity,
-                            transition: "opacity 0.2s ease"
-                        }}
-                        onMouseEnter={(e) => {
-                            e.currentTarget.style.opacity = "1";
-                        }}
-                        onMouseLeave={(e) => {
-                            e.currentTarget.style.opacity = footer.sendButtonHoverOpacity.toString();
-                        }}
-                    >
-                        {getSendIcon()}
-                    </button>
+                        <button
+                            type="button"
+                            style={{
+                                cursor: "pointer",
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                background: footer.sendButtonBackgroundColor === "transparent" ? "transparent" : footer.sendButtonBackgroundColor,
+                                border: "none",
+                                borderRadius: `${footer.sendButtonBorderRadius}px`,
+                                width: `${footer.sendButtonSize}px`,
+                                height: `${footer.sendButtonSize}px`,
+                                padding: 0,
+                                opacity: footer.sendButtonHoverOpacity,
+                                transition: "opacity 0.2s ease"
+                            }}
+                            onMouseEnter={(e) => {
+                                e.currentTarget.style.opacity = "1";
+                            }}
+                            onMouseLeave={(e) => {
+                                e.currentTarget.style.opacity = footer.sendButtonHoverOpacity.toString();
+                            }}
+                        >
+                            {getSendIcon()}
+                        </button>
+                    </div>
                 </div>
-            </div>
             )}
 
 

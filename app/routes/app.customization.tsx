@@ -295,21 +295,17 @@ export default function Customization() {
                 </s-stack>
 
                 {/* Widget Customize Preview */}
-                <s-stack>
-                    <div style={{ position: 'relative' }}>
-                        <div style={{flex: "1", width: "100%", position: 'fixed', top: '1px', zIndex: 10 }}>
-                            <s-box padding="none">
-                                <s-stack padding="small-200">
-                                    <s-heading>Live Preview</s-heading>
-                                </s-stack>
+                <div style={{ height: "fit-content", width: "100%", flex: "1", }}>
+                    <s-stack>
+                        <div style={{ top: '1px', zIndex: 10 }}>
+                            <s-stack padding="small-200">
+                                <s-heading>Live Preview</s-heading>
+                            </s-stack>
 
-
-                                <ChatbotPreview key={presetKey} data={formData} />
-
-                            </s-box>
+                            <ChatbotPreview key={presetKey} data={formData} />
                         </div>
-                    </div>
-                </s-stack>
+                    </s-stack>
+                </div>
             </s-grid>
         </s-page>
     )
