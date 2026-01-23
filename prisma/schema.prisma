@@ -137,3 +137,14 @@ model ChatbotCustomization {
 
     @@index([shop])
 }
+
+// AI Personality & Behavior Settings (Prompts for OpenAI)
+model AISettings {
+    id        String   @id @default(uuid())
+    shop      String   @unique // One AI settings per shop
+    settings  Json     // Stores the complete AISettingsState as JSON
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@index([shop])
+}

@@ -6,47 +6,247 @@ import { RecommendedProducts, Product } from "app/components/AIPersonalityAndBeh
 import { ResponseSettings, ResponseSettingsData } from "app/components/AIPersonalityAndBehavior/ResponseSettings";
 import { ResponseTone, ResponseToneData } from "app/components/AIPersonalityAndBehavior/ResponseTone";
 import { StoreDetails, StoreDetailsData } from "app/components/AIPersonalityAndBehavior/StoreDetails";
-import { useState } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useFetcher, useLoaderData, LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
+import { authenticate } from "app/shopify.server";
+import prisma from "app/db.server";
+import { useAppBridge } from "@shopify/app-bridge-react";
+import { Prisma } from "@prisma/client";
+
+// ============================================================================
+// AISettingsState Interface - Complete structure for AI settings
+// ============================================================================
+export interface AISettingsState {
+    aiInstructions: string;
+    recommendedProducts: Product[];
+    storeDetails: StoreDetailsData;
+    policies: PoliciesData;
+    newArrivals: Product[];
+    bestSellers: Product[];
+    responseTone: ResponseToneData;
+    languageSettings: LanguageSettingsData;
+    responseSettings: ResponseSettingsData;
+}
+
+// ============================================================================
+// LOADER - Fetch saved AI settings from database
+// ============================================================================
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+    const { session } = await authenticate.admin(request);
+    
+    if (!session?.shop) {
+        return { aiSettings: null };
+    }
+
+    try {
+        const aiSettings = await prisma.aISettings.findUnique({
+            where: { shop: session.shop },
+            select: {
+                settings: true,
+                updatedAt: true
+            }
+        });
+
+        return {
+            aiSettings: aiSettings?.settings as AISettingsState | null,
+            updatedAt: aiSettings?.updatedAt || null
+        };
+    } catch (error) {
+        console.error("[LOADER] Error fetching AI settings:", error);
+        return { aiSettings: null };
+    }
+};
+
+// ============================================================================
+// ACTION - Save AI settings to database
+// ============================================================================
+export const action = async ({ request }: ActionFunctionArgs) => {
+    const { session } = await authenticate.admin(request);
+    
+    if (!session?.shop) {
+        return { error: "Unauthorized" };
+    }
+
+    try {
+        const body = await request.json();
+        // Handle both stringified JSON and direct object
+        const settings: AISettingsState = typeof body.settings === 'string' 
+            ? JSON.parse(body.settings) 
+            : body.settings;
+
+        if (!settings) {
+            return { error: "Settings data is required" };
+        }
+
+        // Validate that settings is an object
+        if (typeof settings !== "object" || Array.isArray(settings)) {
+            return { error: "Invalid settings format" };
+        }
+
+        // Convert AISettingsState to Prisma JSON format
+        const settingsJson = JSON.parse(JSON.stringify(settings)) as unknown as Prisma.InputJsonValue;
+        
+        await prisma.aISettings.upsert({
+            where: { shop: session.shop },
+            create: {
+                shop: session.shop,
+                settings: settingsJson
+            },
+            update: {
+                settings: settingsJson,
+                updatedAt: new Date()
+            }
+        });
+
+        return { success: true, message: "AI settings saved successfully" };
+    } catch (error) {
+        console.error("[ACTION] Error saving AI settings:", error);
+        return { error: "Failed to save AI settings" };
+    }
+};
 
 
 export default function AIPersonalityAndBehavior() {
-    // AI Instructions State
-    const [aiInstructions, setAiInstructions] = useState("");
+    const loaderData = useLoaderData<typeof loader>();
+    const fetcher = useFetcher();
+    const shopify = useAppBridge();
+    const [isSaving, setIsSaving] = useState(false);
 
-    // Recommended Products State
-    const [recommentProducts, setRecommentProducts] = useState<Product[]>([]);
+    // Initialize state from loader or use defaults
+    const [aiInstructions, setAiInstructions] = useState(() => 
+        (loaderData.aiSettings?.aiInstructions || "") as string
+    );
 
-    // Store Details State
-    const [storeDetails, setStoreDetails] = useState<StoreDetailsData>({
-        about: "",
-        location: ""
-    });
+    const [recommentProducts, setRecommentProducts] = useState<Product[]>(() => 
+        loaderData.aiSettings?.recommendedProducts || []
+    );
 
-    // Policies State
-    const [policies, setPolicies] = useState<PoliciesData>({
-        shipping: "",
-        payment: "",
-        refund: ""
-    });
+    const [storeDetails, setStoreDetails] = useState<StoreDetailsData>(() => 
+        loaderData.aiSettings?.storeDetails || {
+            about: "",
+            location: ""
+        }
+    );
 
-    // 5. NEW: Custom Picks State 
-    const [newArrivals, setNewArrivals] = useState<Product[]>([]);
-    const [bestSellers, setBestSellers] = useState<Product[]>([]);
+    const [policies, setPolicies] = useState<PoliciesData>(() => 
+        loaderData.aiSettings?.policies || {
+            shipping: "",
+            payment: "",
+            refund: ""
+        }
+    );
 
-    const [responseTone, setResponseTone] = useState<ResponseToneData>({
-        selectedTone: ['professional'],
-        customInstructions: "Speak in a calm and friendly tone."
-    });
+    const [newArrivals, setNewArrivals] = useState<Product[]>(() => 
+        loaderData.aiSettings?.newArrivals || []
+    );
 
-    const [languageSettings, setLanguageSettings] = useState<LanguageSettingsData>({
-        primaryLanguage: "english",
-        autoDetect: true
-    });
+    const [bestSellers, setBestSellers] = useState<Product[]>(() => 
+        loaderData.aiSettings?.bestSellers || []
+    );
 
-    const [responseSettings, setResponseSettings] = useState<ResponseSettingsData>({
-        length: ['balanced'],
-        style: ['emojis']
-    });
+    const [responseTone, setResponseTone] = useState<ResponseToneData>(() => 
+        loaderData.aiSettings?.responseTone || {
+            selectedTone: ['professional'],
+            customInstructions: "Speak in a calm and friendly tone."
+        }
+    );
+
+    const [languageSettings, setLanguageSettings] = useState<LanguageSettingsData>(() => 
+        loaderData.aiSettings?.languageSettings || {
+            primaryLanguage: "english",
+            autoDetect: true
+        }
+    );
+
+    const [responseSettings, setResponseSettings] = useState<ResponseSettingsData>(() => 
+        loaderData.aiSettings?.responseSettings || {
+            length: ['balanced'],
+            style: ['emojis']
+        }
+    );
+
+    // Save AI settings to database
+    const saveAISettings = useCallback(async () => {
+        setIsSaving(true);
+        try {
+            const settings: AISettingsState = {
+                aiInstructions,
+                recommendedProducts: recommentProducts,
+                storeDetails,
+                policies,
+                newArrivals,
+                bestSellers,
+                responseTone,
+                languageSettings,
+                responseSettings
+            };
+
+            fetcher.submit(
+                { settings: JSON.stringify(settings) },
+                {
+                    method: "POST",
+                    encType: "application/json"
+                }
+            );
+        } catch (error) {
+            console.error("[SAVE] Error saving AI settings:", error);
+            shopify.toast.show("Failed to save AI settings", { isError: true });
+            setIsSaving(false);
+        }
+    }, [
+        aiInstructions,
+        recommentProducts,
+        storeDetails,
+        policies,
+        newArrivals,
+        bestSellers,
+        responseTone,
+        languageSettings,
+        responseSettings,
+        fetcher,
+        shopify
+    ]);
+
+    // Debounced save function to avoid too many API calls
+    const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const debouncedSave = useCallback(() => {
+        if (saveTimeoutRef.current) {
+            clearTimeout(saveTimeoutRef.current);
+        }
+        
+        saveTimeoutRef.current = setTimeout(() => {
+            saveAISettings();
+        }, 1000); // Save 1 second after last change
+    }, [saveAISettings]);
+
+    // Auto-save when any setting changes
+    useEffect(() => {
+        debouncedSave();
+    }, [
+        aiInstructions,
+        recommentProducts,
+        storeDetails,
+        policies,
+        newArrivals,
+        bestSellers,
+        responseTone,
+        languageSettings,
+        responseSettings,
+        debouncedSave
+    ]);
+
+    // Show toast on save success/error
+    useEffect(() => {
+        if (fetcher.data) {
+            if (fetcher.data.error) {
+                shopify.toast.show(fetcher.data.error, { isError: true });
+                setIsSaving(false);
+            } else if (fetcher.data.success) {
+                shopify.toast.show("AI settings saved successfully");
+                setIsSaving(false);
+            }
+        }
+    }, [fetcher.data, shopify]);
 
     // const handleChange = (event: CallbackEvent<"s-choice-list">) => {
     //     console.log('Values: ', event.currentTarget.values)
@@ -67,7 +267,11 @@ export default function AIPersonalityAndBehavior() {
                                 <s-button variant="tertiary" interestFor="ai-instruction-tooltip" accessibilityLabel="AI-Instructions" icon="info" />
                             </>
                         </div>
-                        <s-button variant="primary">Save</s-button>
+                        {isSaving && (
+                            <s-banner tone="info">
+                                Saving AI settings...
+                            </s-banner>
+                        )}
                     </div>
                     <s-text-area
                         required
