@@ -19,7 +19,8 @@ import {
     IconChevronRight,
     IconArrowUpRight,
     IconArrowRightCircle,
-    IconSend2
+    IconSend2,
+    IconInfoCircle
 } from "@tabler/icons-react";
 
 interface ChatbotPreviewProps {
@@ -27,7 +28,25 @@ interface ChatbotPreviewProps {
 }
 
 export default function ChatbotPreview({ data }: ChatbotPreviewProps) {
-    const { chatWindow, messageBox, topNav, welcome, position, btnSize, btnAnim, closeButtonAnim, footer } = data;
+    const { chatWindow, messageBox, topNav, welcome, position, btnSize, btnAnim, closeButtonAnim, footer, productSlider = {
+        enabled: false,
+        cardWidth: 160,
+        cardHeight: 240,
+        cardPadding: 12,
+        cardBorderRadius: 12,
+        cardGap: 12,
+        imageHeight: 120,
+        imageBorderRadius: 8,
+        titleFontSize: 14,
+        priceFontSize: 14,
+        showPrice: true,
+        showAskButton: true,
+        askButtonSize: 28,
+        askButtonIconColor: "#666666",
+        backgroundColor: "#FFFFFF",
+        borderColor: "#E5E7EB",
+        borderWidth: 1
+    } } = data;
     const [isChatOpen, setIsChatOpen] = useState(true);
     const [isClosing, setIsClosing] = useState(false);
 
@@ -326,6 +345,182 @@ export default function ChatbotPreview({ data }: ChatbotPreviewProps) {
                         {messageBox.typingIndicator !== "None" && (
                             <div style={{ ...botMessageStyle, width: 'fit-content', marginTop: 10, padding: '8px 16px' }}>
                                 {messageBox.typingIndicator === "Dots (animated)" ? "•••" : "AI is typing..."}
+                            </div>
+                        )}
+
+                        {/* Product Slider */}
+                        {productSlider.enabled && (
+                            <div style={{ 
+                                marginTop: '16px', 
+                                marginBottom: '16px',
+                                width: '100%'
+                            }}>
+                                <div style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '8px',
+                                    marginBottom: '8px'
+                                }}>
+                                    <span style={{
+                                        fontSize: '13px',
+                                        fontWeight: 600,
+                                        color: chatWindow.secondaryTextColor || '#333'
+                                    }}>Suggested Products</span>
+                                </div>
+                                <div style={{
+                                    position: 'relative',
+                                    width: '100%',
+                                    overflow: 'hidden'
+                                }}>
+                                    <div style={{
+                                        display: 'flex',
+                                        gap: `${productSlider.cardGap}px`,
+                                        overflowX: 'auto',
+                                        overflowY: 'hidden',
+                                        scrollbarWidth: 'thin',
+                                        scrollbarColor: `${primaryThemeColor} transparent`,
+                                        paddingBottom: '8px',
+                                        WebkitOverflowScrolling: 'touch'
+                                    }}>
+                                        {/* Mock Products for Preview */}
+                                        {[
+                                            { id: '1', title: 'Premium Headphones', price: '$99.99', image: 'https://via.placeholder.com/160x120/4A90E2/FFFFFF?text=Headphones' },
+                                            { id: '2', title: 'Wireless Mouse', price: '$29.99', image: 'https://via.placeholder.com/160x120/50C878/FFFFFF?text=Mouse' },
+                                            { id: '3', title: 'Mechanical Keyboard', price: '$149.99', image: 'https://via.placeholder.com/160x120/FF6B6B/FFFFFF?text=Keyboard' },
+                                            { id: '4', title: 'USB-C Hub', price: '$49.99', image: 'https://via.placeholder.com/160x120/9B59B6/FFFFFF?text=Hub' }
+                                        ].map((product) => (
+                                            <button
+                                                key={product.id}
+                                                type="button"
+                                                style={{
+                                                    minWidth: `${productSlider.cardWidth}px`,
+                                                    height: `${productSlider.cardHeight}px`,
+                                                    backgroundColor: productSlider.backgroundColor,
+                                                    border: `${productSlider.borderWidth}px solid ${productSlider.borderColor}`,
+                                                    borderRadius: `${productSlider.cardBorderRadius}px`,
+                                                    padding: `${productSlider.cardPadding}px`,
+                                                    display: 'flex',
+                                                    flexDirection: 'column',
+                                                    cursor: 'pointer',
+                                                    transition: 'all 0.2s ease',
+                                                    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                                                    textAlign: 'left',
+                                                    fontFamily: 'inherit'
+                                                }}
+                                                onMouseEnter={(e) => {
+                                                    e.currentTarget.style.transform = 'translateY(-2px)';
+                                                    e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.15)';
+                                                }}
+                                                onMouseLeave={(e) => {
+                                                    e.currentTarget.style.transform = 'translateY(0)';
+                                                    e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+                                                }}
+                                                onClick={() => {
+                                                    // In real implementation, this would open the product page
+                                                    console.log('Open product page:', product.id);
+                                                }}
+                                                title={`View ${product.title}`}
+                                                aria-label={`View product: ${product.title}`}
+                                            >
+                                                {/* Product Image */}
+                                                <div style={{
+                                                    width: '100%',
+                                                    height: `${productSlider.imageHeight}px`,
+                                                    borderRadius: `${productSlider.imageBorderRadius}px`,
+                                                    overflow: 'hidden',
+                                                    marginBottom: '8px',
+                                                    backgroundColor: '#f0f0f0',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center'
+                                                }}>
+                                                    <img 
+                                                        src={product.image} 
+                                                        alt={product.title}
+                                                        style={{
+                                                            width: '100%',
+                                                            height: '100%',
+                                                            objectFit: 'cover'
+                                                        }}
+                                                    />
+                                                </div>
+
+                                                {/* Product Info */}
+                                                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                                                    <div>
+                                                        <h4 style={{
+                                                            margin: 0,
+                                                            fontSize: `${productSlider.titleFontSize}px`,
+                                                            fontWeight: 600,
+                                                            color: chatWindow.secondaryTextColor || '#333',
+                                                            lineHeight: '1.3',
+                                                            marginBottom: '4px',
+                                                            overflow: 'hidden',
+                                                            textOverflow: 'ellipsis',
+                                                            display: '-webkit-box',
+                                                            WebkitLineClamp: 2,
+                                                            WebkitBoxOrient: 'vertical'
+                                                        }}>
+                                                            {product.title}
+                                                        </h4>
+                                                        {productSlider.showPrice && (
+                                                            <p style={{
+                                                                margin: 0,
+                                                                fontSize: `${productSlider.priceFontSize}px`,
+                                                                fontWeight: 600,
+                                                                color: primaryThemeColor,
+                                                                marginTop: '4px'
+                                                            }}>
+                                                                {product.price}
+                                                            </p>
+                                                        )}
+                                                    </div>
+
+                                                    {/* Ask Me More Details Button */}
+                                                    {productSlider.showAskButton && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                // In real implementation, this would trigger chatbot to show product details
+                                                                console.log('Ask for more details about:', product.id);
+                                                            }}
+                                                            style={{
+                                                                marginTop: '8px',
+                                                                width: `${productSlider.askButtonSize}px`,
+                                                                height: `${productSlider.askButtonSize}px`,
+                                                                borderRadius: '50%',
+                                                                border: 'none',
+                                                                backgroundColor: 'transparent',
+                                                                cursor: 'pointer',
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                                transition: 'all 0.2s ease',
+                                                                alignSelf: 'flex-start'
+                                                            }}
+                                                            onMouseEnter={(e) => {
+                                                                e.currentTarget.style.backgroundColor = 'rgba(0,0,0,0.05)';
+                                                                e.currentTarget.style.transform = 'scale(1.1)';
+                                                            }}
+                                                            onMouseLeave={(e) => {
+                                                                e.currentTarget.style.backgroundColor = 'transparent';
+                                                                e.currentTarget.style.transform = 'scale(1)';
+                                                            }}
+                                                            title="Ask me more details"
+                                                            aria-label="Ask for more product details"
+                                                        >
+                                                            <IconInfoCircle 
+                                                                size={productSlider.askButtonSize * 0.7} 
+                                                                color={productSlider.askButtonIconColor} 
+                                                            />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
                             </div>
                         )}
 

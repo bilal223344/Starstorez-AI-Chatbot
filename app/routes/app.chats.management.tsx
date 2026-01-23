@@ -376,6 +376,25 @@ function ChatInterface({
             sendButtonHoverOpacity: 0.9,
             sendIconName: "send",
             sendIconSize: 16
+        },
+        productSlider: {
+            enabled: false,
+            cardWidth: 160,
+            cardHeight: 240,
+            cardPadding: 12,
+            cardBorderRadius: 12,
+            cardGap: 12,
+            imageHeight: 120,
+            imageBorderRadius: 8,
+            titleFontSize: 14,
+            priceFontSize: 14,
+            showPrice: true,
+            showAskButton: true,
+            askButtonSize: 28,
+            askButtonIconColor: "#666666",
+            backgroundColor: "#FFFFFF",
+            borderColor: "#E5E7EB",
+            borderWidth: 1
         }
     };
 

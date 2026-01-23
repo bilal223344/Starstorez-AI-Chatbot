@@ -9,7 +9,8 @@ import {
     TopNavigationStyling,
     PositionAndSizeSettings,
     WelcomeAndGreetingSettings,
-    PresetTemplates
+    PresetTemplates,
+    ProductSliderStyling
 } from "app/components/CustomizationAndAppearance/index"
 import { useState } from "react";
 
@@ -112,6 +113,25 @@ export interface MasterState {
         sendIconName: string;
         sendIconSize: number;
     };
+    productSlider: {
+        enabled: boolean;
+        cardWidth: number;
+        cardHeight: number;
+        cardPadding: number;
+        cardBorderRadius: number;
+        cardGap: number;
+        imageHeight: number;
+        imageBorderRadius: number;
+        titleFontSize: number;
+        priceFontSize: number;
+        showPrice: boolean;
+        showAskButton: boolean;
+        askButtonSize: number;
+        askButtonIconColor: string;
+        backgroundColor: string;
+        borderColor: string;
+        borderWidth: number;
+    };
 }
 
 
@@ -208,6 +228,25 @@ export default function Customization() {
             sendButtonHoverOpacity: 0.9,
             sendIconName: "send",
             sendIconSize: 16
+        },
+        productSlider: {
+            enabled: false,
+            cardWidth: 160,
+            cardHeight: 240,
+            cardPadding: 12,
+            cardBorderRadius: 12,
+            cardGap: 12,
+            imageHeight: 120,
+            imageBorderRadius: 8,
+            titleFontSize: 14,
+            priceFontSize: 14,
+            showPrice: true,
+            showAskButton: true,
+            askButtonSize: 28,
+            askButtonIconColor: "#666666",
+            backgroundColor: "#FFFFFF",
+            borderColor: "#E5E7EB",
+            borderWidth: 1
         }
     });
 
@@ -298,6 +337,12 @@ export default function Customization() {
                     <CloseButtonAnimations
                         data={formData.closeButtonAnim}
                         onUpdate={(key, val) => handleUpdate("closeButtonAnim", key, val)}
+                    />
+
+                    {/* Product Slider Styling */}
+                    <ProductSliderStyling
+                        data={formData.productSlider}
+                        onUpdate={(key, val) => handleUpdate("productSlider", key, val)}
                     />
 
                 </s-stack>

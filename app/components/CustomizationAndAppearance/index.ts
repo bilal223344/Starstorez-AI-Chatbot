@@ -8,6 +8,7 @@ import TopNavigationStyling from "./TopNavigationStyling";
 import PositionAndSizeSettings from "./PositionAndSizeSettings";
 import WelcomeAndGreetingSettings from "./WelcomeAndGreetingSettings";
 import PresetTemplates from "./PresetTemplates";
+import ProductSliderStyling from "./ProductSliderStyling";
 
 
 export {
@@ -20,5 +21,6 @@ export {
     TopNavigationStyling,
     PositionAndSizeSettings,
     WelcomeAndGreetingSettings,
-    PresetTemplates
+    PresetTemplates,
+    ProductSliderStyling
 }

@@ -95,6 +95,25 @@ export default function PresetTemplates({ onApplyPreset }: PresetTemplatesProps)
             sendButtonHoverOpacity: 0.8,
             sendIconName: "send",
             sendIconSize: 18
+        },
+        productSlider: {
+            enabled: true,
+            cardWidth: 160,
+            cardHeight: 240,
+            cardPadding: 12,
+            cardBorderRadius: 12,
+            cardGap: 12,
+            imageHeight: 120,
+            imageBorderRadius: 8,
+            titleFontSize: 14,
+            priceFontSize: 14,
+            showPrice: true,
+            showAskButton: true,
+            askButtonSize: 28,
+            askButtonIconColor: "#2563EB",
+            backgroundColor: "#FFFFFF",
+            borderColor: "#E5E7EB",
+            borderWidth: 1
         }
     };
 
@@ -188,6 +207,25 @@ export default function PresetTemplates({ onApplyPreset }: PresetTemplatesProps)
             sendButtonHoverOpacity: 0.9,
             sendIconName: "arrow-right",
             sendIconSize: 20
+        },
+        productSlider: {
+            enabled: true,
+            cardWidth: 170,
+            cardHeight: 250,
+            cardPadding: 14,
+            cardBorderRadius: 16,
+            cardGap: 14,
+            imageHeight: 130,
+            imageBorderRadius: 10,
+            titleFontSize: 15,
+            priceFontSize: 15,
+            showPrice: true,
+            showAskButton: true,
+            askButtonSize: 30,
+            askButtonIconColor: "#FF6B6B",
+            backgroundColor: "#FFFFFF",
+            borderColor: "#ECF0F1",
+            borderWidth: 1
         }
     };
 
@@ -281,6 +319,25 @@ export default function PresetTemplates({ onApplyPreset }: PresetTemplatesProps)
             sendButtonHoverOpacity: 0.8,
             sendIconName: "send",
             sendIconSize: 16
+        },
+        productSlider: {
+            enabled: true,
+            cardWidth: 165,
+            cardHeight: 245,
+            cardPadding: 12,
+            cardBorderRadius: 12,
+            cardGap: 12,
+            imageHeight: 125,
+            imageBorderRadius: 8,
+            titleFontSize: 14,
+            priceFontSize: 14,
+            showPrice: true,
+            showAskButton: true,
+            askButtonSize: 28,
+            askButtonIconColor: "#FFFFFF",
+            backgroundColor: "#1A1A1A",
+            borderColor: "#333333",
+            borderWidth: 1
         }
     };
 
@@ -374,6 +431,25 @@ export default function PresetTemplates({ onApplyPreset }: PresetTemplatesProps)
             sendButtonHoverOpacity: 0.9,
             sendIconName: "plane",
             sendIconSize: 22
+        },
+        productSlider: {
+            enabled: true,
+            cardWidth: 175,
+            cardHeight: 260,
+            cardPadding: 16,
+            cardBorderRadius: 20,
+            cardGap: 16,
+            imageHeight: 140,
+            imageBorderRadius: 12,
+            titleFontSize: 15,
+            priceFontSize: 16,
+            showPrice: true,
+            showAskButton: true,
+            askButtonSize: 32,
+            askButtonIconColor: "#C44569",
+            backgroundColor: "#FFFFFF",
+            borderColor: "#DFE6E9",
+            borderWidth: 1
         }
     };
 
@@ -467,6 +543,25 @@ export default function PresetTemplates({ onApplyPreset }: PresetTemplatesProps)
             sendButtonHoverOpacity: 0.85,
             sendIconName: "send",
             sendIconSize: 16
+        },
+        productSlider: {
+            enabled: true,
+            cardWidth: 155,
+            cardHeight: 235,
+            cardPadding: 10,
+            cardBorderRadius: 10,
+            cardGap: 10,
+            imageHeight: 115,
+            imageBorderRadius: 6,
+            titleFontSize: 13,
+            priceFontSize: 13,
+            showPrice: true,
+            showAskButton: true,
+            askButtonSize: 26,
+            askButtonIconColor: "#2C3E50",
+            backgroundColor: "#FFFFFF",
+            borderColor: "#BDC3C7",
+            borderWidth: 1
         }
     };
 
