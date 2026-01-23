@@ -1,10 +1,10 @@
-import { useEffect } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLoaderData } from "react-router";
 import { authenticate } from "../shopify.server";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { formatDistanceToNow } from "date-fns";
 import prisma from "../db.server";
+import { syncProduct } from "app/services/productService";
 
 // ============================================================================
 // LOADER - Aggregate Real Prisma Data
@@ -75,7 +75,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const intent = formData.get("intent");
 
   if (intent === "sync") {
-    await syncProduct(shop, session.accessToken!);
+    await syncProduct(session.shop, session.accessToken!);
     return { success: true };
   }
 
