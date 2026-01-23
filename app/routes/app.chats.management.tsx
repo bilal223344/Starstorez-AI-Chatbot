@@ -323,6 +323,10 @@ function ChatInterface({
         welcome: {
             greeting: "👋 Welcome! How can I help you today?",
             quickQuestions: [],
+            quickQuestionPadding: 8,
+            quickQuestionBorderRadius: 20,
+            quickQuestionFontSize: 12,
+            quickQuestionGap: 8,
             inputPlaceholder: "Type your message here...",
             sendOnEnter: false
         },

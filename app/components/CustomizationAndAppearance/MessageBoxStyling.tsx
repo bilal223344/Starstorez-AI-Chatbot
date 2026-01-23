@@ -95,14 +95,14 @@ export default function MessageBoxStyling({ data, onUpdate }: MessageBoxStylingP
                                             <s-number-field label="Vertical padding slider"
                                                 value={data.paddingVertical.toString()}
                                                 onInput={(e: CallbackEvent<"s-number-field">) => onUpdate("paddingVertical", Number(e.currentTarget.value))}
-                                                min={8} max={20} suffix="px"
+                                                min={4} max={20} suffix="px"
                                             />
                                         </s-stack>
                                         <s-stack gap="small-200">
                                             <s-number-field label="Horizontal padding slider"
                                                 value={data.paddingHorizontal.toString()}
                                                 onInput={(e: CallbackEvent<"s-number-field">) => onUpdate("paddingHorizontal", Number(e.currentTarget.value))}
-                                                min={12} max={24} suffix="px"
+                                                min={8} max={24} suffix="px"
                                             />
                                         </s-stack>
                                     </s-grid>

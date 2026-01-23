@@ -60,6 +60,10 @@ export interface MasterState {
         quickQuestions: string[]; // Array of strings
         inputPlaceholder: string;
         sendOnEnter: boolean;
+        quickQuestionPadding: number;
+        quickQuestionBorderRadius: number;
+        quickQuestionFontSize: number;
+        quickQuestionGap: number;
     };
     topNav: {
         avatar: string;
@@ -152,7 +156,11 @@ export default function Customization() {
                 "Can you help me find something?"
             ],
             inputPlaceholder: "Type your message here...",
-            sendOnEnter: false
+            sendOnEnter: false,
+            quickQuestionPadding: 8,
+            quickQuestionBorderRadius: 20,
+            quickQuestionFontSize: 12,
+            quickQuestionGap: 8
         },
         topNav: {
             avatar: "",
@@ -297,7 +305,7 @@ export default function Customization() {
                 {/* Widget Customize Preview */}
                 <div style={{ height: "fit-content", width: "100%", flex: "1", }}>
                     <s-stack>
-                        <div style={{ top: '1px', zIndex: 10 }}>
+                        <div style={{ position: 'fixed', width: "35%", top: '1px', zIndex: 10 }}>
                             <s-stack padding="small-200">
                                 <s-heading>Live Preview</s-heading>
                             </s-stack>

@@ -102,6 +102,11 @@ export default function ChatbotPreview({ data }: ChatbotPreviewProps) {
     const primaryThemeBackground = chatWindow.colorMode === 'gradient'
         ? `linear-gradient(135deg, ${chatWindow.gradientStart}, ${chatWindow.gradientEnd})`
         : chatWindow.primaryColor;
+    
+    // For borders and text colors, we need a solid color (use gradientStart when in gradient mode)
+    const primaryThemeColor = chatWindow.colorMode === 'gradient'
+        ? chatWindow.gradientStart
+        : chatWindow.primaryColor;
 
     // --- 2. DYNAMIC STYLES ---
 
@@ -223,7 +228,7 @@ export default function ChatbotPreview({ data }: ChatbotPreviewProps) {
     return (
         <div style={{
             width: "100%",
-            height: `${chatWindow.height + 150}px`,
+            height: `${chatWindow.height + 75}px`,
             backgroundColor: "#e5e5e5",
             position: "relative",
             borderRadius: "12px",
@@ -313,7 +318,7 @@ export default function ChatbotPreview({ data }: ChatbotPreviewProps) {
                                 Hi! I&apos;m looking for the best sellers.
                             </div>
                             {messageBox.timestampDisplay && (
-                                <span style={{ fontSize: '10px', color: '#999', marginRight: 5, marginBottom: 10 }}>10:31 AM</span>
+                                <span style={{ fontSize: '10px', color: '#999', marginRight: 5, }}>10:31 AM</span>
                             )}
                         </div>
 
@@ -325,15 +330,15 @@ export default function ChatbotPreview({ data }: ChatbotPreviewProps) {
                         )}
 
                         {/* Quick Questions (Chips) */}
-                        <div style={{ marginTop: 'auto', display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'flex-end', paddingTop: '10px' }}>
+                        <div style={{ marginTop: 'auto', display: 'flex', flexWrap: 'wrap', gap: `${welcome.quickQuestionGap}px`, justifyContent: 'flex-end', paddingTop: '10px' }}>
                             {welcome.quickQuestions.map((q, i) => (
                                 <button key={i} style={{
                                     background: "rgba(0,0,0,0.03)", // Subtle background
-                                    border: `1px solid ${chatWindow.primaryColor}`, // Border matches theme
-                                    color: chatWindow.primaryColor, // Text matches theme
-                                    padding: "8px 12px",
-                                    borderRadius: "20px",
-                                    fontSize: "12px",
+                                    border: `1px solid ${primaryThemeColor}`, // Border matches theme
+                                    color: primaryThemeColor, // Text matches theme
+                                    padding: `${welcome.quickQuestionPadding}px ${welcome.quickQuestionPadding * 1.5}px`,
+                                    borderRadius: `${welcome.quickQuestionBorderRadius}px`,
+                                    fontSize: `${welcome.quickQuestionFontSize}px`,
                                     fontWeight: 500,
                                     cursor: "pointer",
                                     transition: "all 0.2s",

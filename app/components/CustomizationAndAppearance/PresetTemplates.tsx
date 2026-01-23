@@ -43,7 +43,11 @@ export default function PresetTemplates({ onApplyPreset }: PresetTemplatesProps)
                 "Can you help me find something?"
             ],
             inputPlaceholder: "Type your message...",
-            sendOnEnter: false
+            sendOnEnter: false,
+            quickQuestionPadding: 8,
+            quickQuestionBorderRadius: 20,
+            quickQuestionFontSize: 12,
+            quickQuestionGap: 8
         },
         topNav: {
             avatar: "",
@@ -132,7 +136,11 @@ export default function PresetTemplates({ onApplyPreset }: PresetTemplatesProps)
                 "Need help?"
             ],
             inputPlaceholder: "Say something...",
-            sendOnEnter: false
+            sendOnEnter: false,
+            quickQuestionPadding: 10,
+            quickQuestionBorderRadius: 24,
+            quickQuestionFontSize: 13,
+            quickQuestionGap: 10
         },
         topNav: {
             avatar: "",
@@ -221,7 +229,11 @@ export default function PresetTemplates({ onApplyPreset }: PresetTemplatesProps)
                 "Contact support"
             ],
             inputPlaceholder: "Type your message here...",
-            sendOnEnter: false
+            sendOnEnter: false,
+            quickQuestionPadding: 8,
+            quickQuestionBorderRadius: 16,
+            quickQuestionFontSize: 12,
+            quickQuestionGap: 8
         },
         topNav: {
             avatar: "",
@@ -310,7 +322,11 @@ export default function PresetTemplates({ onApplyPreset }: PresetTemplatesProps)
                 "Help me shop"
             ],
             inputPlaceholder: "Ask me anything...",
-            sendOnEnter: false
+            sendOnEnter: false,
+            quickQuestionPadding: 12,
+            quickQuestionBorderRadius: 28,
+            quickQuestionFontSize: 14,
+            quickQuestionGap: 12
         },
         topNav: {
             avatar: "",
@@ -399,7 +415,11 @@ export default function PresetTemplates({ onApplyPreset }: PresetTemplatesProps)
                 "General question"
             ],
             inputPlaceholder: "Enter your message...",
-            sendOnEnter: false
+            sendOnEnter: false,
+            quickQuestionPadding: 8,
+            quickQuestionBorderRadius: 18,
+            quickQuestionFontSize: 12,
+            quickQuestionGap: 8
         },
         topNav: {
             avatar: "",

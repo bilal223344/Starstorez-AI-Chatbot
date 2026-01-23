@@ -7,6 +7,10 @@ export interface WelcomeData {
     quickQuestions: string[];
     inputPlaceholder: string;
     sendOnEnter: boolean;
+    quickQuestionPadding: number;
+    quickQuestionBorderRadius: number;
+    quickQuestionFontSize: number;
+    quickQuestionGap: number;
 }
 
 interface WelcomeSettingsProps {
@@ -95,6 +99,49 @@ export default function WelcomeAndGreetingSettings({ data, onUpdate }: WelcomeSe
                                     {data.quickQuestions.length < 5 && (
                                         <s-button icon="plus" onClick={handleAddQuestion}>Add Question</s-button>
                                     )}
+
+                                    {/* Quick Question Button Styling */}
+                                    <s-box border="base base dashed" borderRadius="base" padding="small" background="subdued" paddingBlockStart="small">
+                                        <s-heading>Quick Question Button Styling</s-heading>
+                                        <s-stack direction="block" gap="small" paddingBlockStart="small-200">
+                                            <s-grid gridTemplateColumns="1fr 1fr" gap="small">
+                                                <s-number-field 
+                                                    label="Padding" 
+                                                    value={data.quickQuestionPadding.toString()} 
+                                                    onInput={(e: CallbackEvent<"s-number-field">) => onUpdate("quickQuestionPadding", Number(e.currentTarget.value))} 
+                                                    min={4} 
+                                                    max={20} 
+                                                    suffix="px" 
+                                                />
+                                                <s-number-field 
+                                                    label="Border Radius" 
+                                                    value={data.quickQuestionBorderRadius.toString()} 
+                                                    onInput={(e: CallbackEvent<"s-number-field">) => onUpdate("quickQuestionBorderRadius", Number(e.currentTarget.value))} 
+                                                    min={0} 
+                                                    max={50} 
+                                                    suffix="px" 
+                                                />
+                                            </s-grid>
+                                            <s-grid gridTemplateColumns="1fr 1fr" gap="small">
+                                                <s-number-field 
+                                                    label="Font Size" 
+                                                    value={data.quickQuestionFontSize.toString()} 
+                                                    onInput={(e: CallbackEvent<"s-number-field">) => onUpdate("quickQuestionFontSize", Number(e.currentTarget.value))} 
+                                                    min={10} 
+                                                    max={18} 
+                                                    suffix="px" 
+                                                />
+                                                <s-number-field 
+                                                    label="Gap Between Buttons" 
+                                                    value={data.quickQuestionGap.toString()} 
+                                                    onInput={(e: CallbackEvent<"s-number-field">) => onUpdate("quickQuestionGap", Number(e.currentTarget.value))} 
+                                                    min={4} 
+                                                    max={20} 
+                                                    suffix="px" 
+                                                />
+                                            </s-grid>
+                                        </s-stack>
+                                    </s-box>
                                 </s-stack>
 
                                 {/* Input placeholder */}
