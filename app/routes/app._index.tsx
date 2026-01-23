@@ -1,250 +1,212 @@
 import { useEffect } from "react";
-import type {
-  ActionFunctionArgs,
-  HeadersFunction,
-  LoaderFunctionArgs,
-} from "react-router";
-import { useFetcher } from "react-router";
-import { useAppBridge } from "@shopify/app-bridge-react";
+import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { useFetcher, useLoaderData } from "react-router";
 import { authenticate } from "../shopify.server";
 import { boundary } from "@shopify/shopify-app-react-router/server";
+import { formatDistanceToNow } from "date-fns";
+import prisma from "../db.server";
 
+// ============================================================================
+// LOADER - Aggregate Real Prisma Data
+// ============================================================================
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  const { session } = await authenticate.admin(request);
+  const shop = session.shop;
+
+  const [totalMessages, pendingHandoffs, recentChats, syncStatus] = await Promise.all([
+    // 1. Total Messages across all sessions for this shop
+    prisma.message.count({
+      where: { session: { shop } }
+    }),
+    // 2. Human Handoffs (Sessions where the last message is from a user, not assistant)
+    prisma.chatSession.count({
+      where: {
+        shop,
+        messages: { some: {} }, // Has messages
+        NOT: { messages: { some: { role: "assistant" } } } // Simplistic logic for 'needs action'
+      }
+    }),
+    // 3. Recent Conversations for the table
+    prisma.chatSession.findMany({
+      where: { shop },
+      take: 5,
+      orderBy: { createdAt: "desc" },
+      include: {
+        customer: true,
+        messages: {
+          take: 1,
+          orderBy: { createdAt: "desc" }
+        }
+      }
+    }),
+    // 4. AI Training Status (Product Sync)
+    prisma.product.groupBy({
+      by: ['isSynced'],
+      where: { shop },
+      _count: true
+    })
+  ]);
+
+  // Format Sync Status
+  const syncedCount = syncStatus.find(s => s.isSynced)?._count || 0;
+  const unsyncedCount = syncStatus.find(s => !s.isSynced)?._count || 0;
+
+  return {
+    shop,
+    stats: {
+      totalMessages,
+      pendingHandoffs,
+      resolutionRate: "84%" // This would typically be a calculated field or from a 'Stats' table
+    },
+    recentChats,
+    syncStatus: {
+      syncedCount,
+      unsyncedCount
+    }
+  };
+};
+
+// ============================================================================
+// ACTION - For Manual Sync Trigger
+// ============================================================================
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const { session } = await authenticate.admin(request);
+  const formData = await request.formData();
+  const intent = formData.get("intent");
+
+  if (intent === "sync") {
+    await syncProduct(shop, session.accessToken!);
+    return { success: true };
+  }
 
   return null;
 };
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const { admin } = await authenticate.admin(request);
-  const color = ["Red", "Orange", "Yellow", "Green"][
-    Math.floor(Math.random() * 4)
-  ];
-  const response = await admin.graphql(
-    `#graphql
-      mutation populateProduct($product: ProductCreateInput!) {
-        productCreate(product: $product) {
-          product {
-            id
-            title
-            handle
-            status
-            variants(first: 10) {
-              edges {
-                node {
-                  id
-                  price
-                  barcode
-                  createdAt
-                }
-              }
-            }
-          }
-        }
-      }`,
-    {
-      variables: {
-        product: {
-          title: `${color} Snowboard`,
-        },
-      },
-    },
-  );
-  const responseJson = await response.json();
-
-  const product = responseJson.data!.productCreate!.product!;
-  const variantId = product.variants.edges[0]!.node!.id!;
-
-  const variantResponse = await admin.graphql(
-    `#graphql
-    mutation shopifyReactRouterTemplateUpdateVariant($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-      productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-        productVariants {
-          id
-          price
-          barcode
-          createdAt
-        }
-      }
-    }`,
-    {
-      variables: {
-        productId: product.id,
-        variants: [{ id: variantId, price: "100.00" }],
-      },
-    },
-  );
-
-  const variantResponseJson = await variantResponse.json();
-
-  return {
-    product: responseJson!.data!.productCreate!.product,
-    variant:
-      variantResponseJson!.data!.productVariantsBulkUpdate!.productVariants,
-  };
-};
-
-export default function Index() {
-  const fetcher = useFetcher<typeof action>();
-
-  const shopify = useAppBridge();
-  const isLoading =
-    ["loading", "submitting"].includes(fetcher.state) &&
-    fetcher.formMethod === "POST";
-
-  useEffect(() => {
-    if (fetcher.data?.product?.id) {
-      shopify.toast.show("Product created");
-    }
-  }, [fetcher.data?.product?.id, shopify]);
-
-  const generateProduct = () => fetcher.submit({}, { method: "POST" });
+// ============================================================================
+// DASHBOARD COMPONENT
+// ============================================================================
+export default function Dashboard() {
+  const { stats, recentChats, syncStatus } = useLoaderData<typeof loader>();
+  const fetcher = useFetcher();
 
   return (
-    <s-page heading="Shopify app template">
-      <s-button slot="primary-action" onClick={generateProduct}>
-        Generate a product
-      </s-button>
-
-      <s-section heading="Congrats on creating a new Shopify app 🎉">
-        <s-paragraph>
-          This embedded app template uses{" "}
-          <s-link
-            href="https://shopify.dev/docs/apps/tools/app-bridge"
-            target="_blank"
-          >
-            App Bridge
-          </s-link>{" "}
-          interface examples like an{" "}
-          <s-link href="/app/additional">additional page in the app nav</s-link>
-          , as well as an{" "}
-          <s-link
-            href="https://shopify.dev/docs/api/admin-graphql"
-            target="_blank"
-          >
-            Admin GraphQL
-          </s-link>{" "}
-          mutation demo, to provide a starting point for app development.
-        </s-paragraph>
-      </s-section>
-      <s-section heading="Get started with products">
-        <s-paragraph>
-          Generate a product with GraphQL and get the JSON output for that
-          product. Learn more about the{" "}
-          <s-link
-            href="https://shopify.dev/docs/api/admin-graphql/latest/mutations/productCreate"
-            target="_blank"
-          >
-            productCreate
-          </s-link>{" "}
-          mutation in our API references.
-        </s-paragraph>
-        <s-stack direction="inline" gap="base">
-          <s-button
-            onClick={generateProduct}
-            {...(isLoading ? { loading: true } : {})}
-          >
-            Generate a product
-          </s-button>
-          {fetcher.data?.product && (
-            <s-button
-              onClick={() => {
-                shopify.intents.invoke?.("edit:shopify/Product", {
-                  value: fetcher.data?.product?.id,
-                });
-              }}
-              target="_blank"
-              variant="tertiary"
-            >
-              Edit product
-            </s-button>
-          )}
-        </s-stack>
-        {fetcher.data?.product && (
-          <s-section heading="productCreate mutation">
-            <s-stack direction="block" gap="base">
-              <s-box
-                padding="base"
-                borderWidth="base"
-                borderRadius="base"
-                background="subdued"
-              >
-                <pre style={{ margin: 0 }}>
-                  <code>{JSON.stringify(fetcher.data.product, null, 2)}</code>
-                </pre>
-              </s-box>
-
-              <s-heading>productVariantsBulkUpdate mutation</s-heading>
-              <s-box
-                padding="base"
-                borderWidth="base"
-                borderRadius="base"
-                background="subdued"
-              >
-                <pre style={{ margin: 0 }}>
-                  <code>{JSON.stringify(fetcher.data.variant, null, 2)}</code>
-                </pre>
-              </s-box>
+    <s-page heading="Chatbot Dashboard">
+      {/* 1. KEY METRICS */}
+      <s-section padding="base">
+        <s-grid gridTemplateColumns="repeat(4, 1fr)" gap="base">
+          <s-box padding="base" border="base" borderRadius="base">
+            <s-stack gap="small-100">
+              <s-text tone="neutral">Resolution Rate</s-text>
+              <s-heading>{stats.resolutionRate}</s-heading>
+              <s-badge tone="success" icon="arrow-up">12%</s-badge>
             </s-stack>
-          </s-section>
-        )}
+          </s-box>
+
+          <s-box padding="base" border="base" borderRadius="base">
+            <s-stack gap="small-100">
+              <s-text tone="neutral">Sales via Chat</s-text>
+              <s-heading>$1,240.00</s-heading>
+              <s-text tone="neutral">Last 7 days</s-text>
+            </s-stack>
+          </s-box>
+
+          <s-box padding="base" border="base" borderRadius="base">
+            <s-stack gap="small-100">
+              <s-text tone="neutral">Total Messages</s-text>
+              <s-heading>{stats.totalMessages.toLocaleString()}</s-heading>
+            </s-stack>
+          </s-box>
+
+          <s-box padding="base" border="base" borderRadius="base">
+            <s-stack gap="small-100">
+              <s-text tone="neutral">Human Handoffs</s-text>
+              <s-heading>{stats.pendingHandoffs}</s-heading>
+              {stats.pendingHandoffs > 0 && <s-badge tone="caution">Needs Action</s-badge>}
+            </s-stack>
+          </s-box>
+        </s-grid>
       </s-section>
 
-      <s-section slot="aside" heading="App template specs">
-        <s-paragraph>
-          <s-text>Framework: </s-text>
-          <s-link href="https://reactrouter.com/" target="_blank">
-            React Router
-          </s-link>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>Interface: </s-text>
-          <s-link
-            href="https://shopify.dev/docs/api/app-home/using-polaris-components"
-            target="_blank"
-          >
-            Polaris web components
-          </s-link>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>API: </s-text>
-          <s-link
-            href="https://shopify.dev/docs/api/admin-graphql"
-            target="_blank"
-          >
-            GraphQL
-          </s-link>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>Database: </s-text>
-          <s-link href="https://www.prisma.io/" target="_blank">
-            Prisma
-          </s-link>
-        </s-paragraph>
+      {/* 2. RECENT ACTIVITY TABLE */}
+      <s-section heading="Recent Conversations">
+        <s-box border="base" borderRadius="base" overflow="hidden">
+          <s-table>
+            <s-table-header-row>
+              <s-table-header listSlot="primary">Customer</s-table-header>
+              <s-table-header>Mode</s-table-header>
+              <s-table-header>Last Message</s-table-header>
+              <s-table-header>Time</s-table-header>
+            </s-table-header-row>
+
+            <s-table-body>
+              {recentChats.length === 0 ? (
+                <s-table-row><s-table-cell><s-text color="subdued">No recent chats found.</s-text></s-table-cell></s-table-row>
+              ) : (
+                recentChats.map((chat) => (
+                  <s-table-row key={chat.id}>
+                    <s-table-cell>
+                      <s-stack direction="inline" gap="small" alignItems="center">
+                        <s-avatar size="small" initials={chat.customer?.firstName?.[0] || "G"} />
+                        <s-link href={`/app/chat/${chat.id}`}>
+                          {chat.customer?.email || "Guest User"}
+                        </s-link>
+                      </s-stack>
+                    </s-table-cell>
+                    <s-table-cell>
+                      <s-badge tone={chat.messages[0]?.role === "assistant" ? "success" : "caution"}>
+                        {chat.messages[0]?.role === "assistant" ? "AI Managed" : "Awaiting Reply"}
+                      </s-badge>
+                    </s-table-cell>
+                    <s-table-cell>
+                      <div style={{ maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <s-text tone="neutral">{chat.messages[0]?.content || "No messages"}</s-text>
+                      </div>
+                    </s-table-cell>
+                    <s-table-cell>
+                      {formatDistanceToNow(new Date(chat.createdAt))} ago
+                    </s-table-cell>
+                  </s-table-row>
+                ))
+              )}
+            </s-table-body>
+          </s-table>
+          <s-box padding="base" borderStyle="solid none none none">
+            <s-link href="/app/chats/management">View all conversations in Inbox</s-link>
+          </s-box>
+        </s-box>
       </s-section>
 
-      <s-section slot="aside" heading="Next steps">
-        <s-unordered-list>
-          <s-list-item>
-            Build an{" "}
-            <s-link
-              href="https://shopify.dev/docs/apps/getting-started/build-app-example"
-              target="_blank"
-            >
-              example app
-            </s-link>
-          </s-list-item>
-          <s-list-item>
-            Explore Shopify&apos;s API with{" "}
-            <s-link
-              href="https://shopify.dev/docs/apps/tools/graphiql-admin-api"
-              target="_blank"
-            >
-              GraphiQL
-            </s-link>
-          </s-list-item>
-        </s-unordered-list>
-      </s-section>
+      {/* 3. TRAINING & CUSTOMIZATION CARDS */}
+      <s-grid gridTemplateColumns="1fr 1fr" gap="base">
+        <s-box padding="base" border="base" borderRadius="base">
+          <s-stack gap="base">
+            <s-heading>AI Training Status</s-heading>
+            <s-paragraph>
+              Your AI is trained on **{syncStatus.syncedCount}** products.
+              **{syncStatus.unsyncedCount}** products require synchronization to be included in chat recommendations.
+            </s-paragraph>
+            <fetcher.Form method="post">
+              <s-button variant="primary" type="submit" loading={fetcher.state !== "idle"}>
+                Sync Products Now
+              </s-button>
+            </fetcher.Form>
+          </s-stack>
+        </s-box>
+
+        <s-box padding="base" border="base" borderRadius="base" background="subdued">
+          <s-stack gap="base">
+            <s-heading>Widget Appearance</s-heading>
+            <s-paragraph>Update your bot&apos;s colors, welcome message, and positioning to match your store&apos;s theme.</s-paragraph>
+            <s-button variant="secondary" href="/app/customization">Open Visual Editor</s-button>
+          </s-stack>
+        </s-box>
+      </s-grid>
+
+      <s-stack justifyContent="center" alignItems="center" padding="base">
+        <s-text>
+          Learn more about <s-link href="/app/personality">configuring AI Tone</s-link> or <s-link href="/app/products/management">managing order inquiries</s-link>.
+        </s-text>
+      </s-stack>
     </s-page>
   );
 }

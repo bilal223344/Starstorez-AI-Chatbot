@@ -109,12 +109,16 @@ model OrderItem {
 // For your Chatbot history
 model ChatSession {
   id         String    @id @default(uuid())
+  shop       String    // Store identifier
   customerId String?
   customer   Customer? @relation(fields: [customerId], references: [id])
   isGuest    Boolean   @default(true)
   createdAt  DateTime  @default(now())
 
   messages Message[]
+
+  @@index([shop])
+  @@index([customerId])
 }
 
 model Message {

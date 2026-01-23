@@ -22,6 +22,7 @@ export default function App() {
         <s-link href="/app/customization">Chatbot Customization</s-link>
         <s-link href="/app/personality">AI Personality & Behavior</s-link>
         <s-link href="/app/products/management">Products Management</s-link>
+        <s-link href="/app/chats/management">Chats Management</s-link>
       </s-app-nav>
       <Outlet />
     </AppProvider>

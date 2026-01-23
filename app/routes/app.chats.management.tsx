@@ -1,8 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react";
-import type { LoaderFunctionArgs } from "react-router";
-import { authenticate } from "../shopify.server";
 import { CallbackEvent } from "@shopify/polaris-types";
-import type { MasterState } from "./app.customization";
 
 // ============================================================================
 // TYPES
@@ -35,6 +32,21 @@ interface Customer {
     chats: ChatSession[];
 }
 
+interface CustomerSidebarProps {
+    customers: Customer[];
+    selectedCustomerId: string | null;
+    setSelectedCustomerId: (id: string) => void;
+    searchQuery: string;
+    setSearchQuery: (query: string) => void;
+    sourceFilter: string;
+    setSourceFilter: (source: string) => void;
+    modeFilter: string;
+    setModeFilter: (mode: string) => void;
+    dateFilter: string; // New
+    setDateFilter: (date: string) => void; // New
+    formatTime: (date: Date) => string;
+}
+
 interface ChatInterfaceProps {
     customer: Customer | undefined;
     messages: Message[];
@@ -46,109 +58,25 @@ interface ChatInterfaceProps {
     formatTime: (date: Date) => string;
 }
 
-interface CustomerSidebarProps {
-    customers: Customer[];
-    selectedCustomerId: string | null;
-    setSelectedCustomerId: (id: string) => void;
-    searchQuery: string;
-    setSearchQuery: (query: string) => void;
-    aiEnabled: boolean;
-    formatTime: (date: Date) => string;
-}
-
 // ============================================================================
-// MOCK DATA GENERATOR
-// ============================================================================
-
-const generateMockCustomers = (): Customer[] => {
-    const customers: Customer[] = [];
-    const sources = ["SHOPIFY", "WEBSITE", "MANUAL"];
-    const firstNames = ["John", "Sarah", "Michael", "Emily", "David", "Jessica", "Chris", "Amanda"];
-    const lastNames = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis"];
-
-    for (let i = 0; i < 15; i++) {
-        const firstName = firstNames[i % firstNames.length];
-        const lastName = lastNames[i % lastNames.length];
-        const email = `${firstName.toLowerCase()}.${lastName.toLowerCase()}${i}@example.com`;
-
-        const chatCount = Math.floor(Math.random() * 2) + 1;
-        const chats: ChatSession[] = [];
-
-        for (let j = 0; j < chatCount; j++) {
-            const messages: Message[] = [];
-            const messageCount = Math.floor(Math.random() * 10) + 5;
-
-            for (let k = 0; k < messageCount; k++) {
-                const isUser = k % 2 === 0;
-                messages.push({
-                    id: `msg-${i}-${j}-${k}`,
-                    content: isUser
-                        ? `I'm looking for an update on order #100${i}. Can you help?`
-                        : `Of course! Let me check the status of order #100${i} for you.`,
-                    role: isUser ? "user" : "assistant",
-                    createdAt: new Date(Date.now() - (messageCount - k) * 3600000),
-                });
-            }
-
-            chats.push({
-                id: `session-${i}-${j}`,
-                customerId: `customer-${i}`,
-                isGuest: false,
-                createdAt: new Date(),
-                messages,
-            });
-        }
-
-        customers.push({
-            id: `customer-${i}`,
-            shopifyId: `gid://shopify/Customer/${1000 + i}`,
-            email,
-            firstName,
-            lastName,
-            phone: `+1-555-010${i}`,
-            source: sources[i % sources.length],
-            createdAt: new Date(),
-            chats,
-        });
-    }
-    return customers;
-};
-
-// ============================================================================
-// LOADER
-// ============================================================================
-
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-    await authenticate.admin(request);
-    return {};
-};
-
-// ============================================================================
-// MAIN COMPONENT
+// MAIN PAGE COMPONENT
 // ============================================================================
 
 export default function ChatsManagement() {
     const [customers] = useState<Customer[]>(() => generateMockCustomers());
     const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(customers[0]?.id || null);
     const [searchQuery, setSearchQuery] = useState("");
+    const [sourceFilter, setSourceFilter] = useState("");
+    const [modeFilter, setModeFilter] = useState("");
+    const [dateFilter, setDateFilter] = useState("all");
     const [aiEnabled, setAiEnabled] = useState(true);
     const [replyText, setReplyText] = useState("");
-    const scrollRef = useRef<HTMLDivElement>(null);
 
-    // Get selected customer
     const selectedCustomer = useMemo(
         () => customers.find((c) => c.id === selectedCustomerId),
         [customers, selectedCustomerId]
     );
 
-    // Auto-scroll to bottom of chat
-    useEffect(() => {
-        if (scrollRef.current) {
-            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-        }
-    }, [selectedCustomerId, selectedCustomer?.chats]);
-
-    // Derived Data
     const allMessages = useMemo(() => {
         if (!selectedCustomer) return [];
         return selectedCustomer.chats
@@ -157,24 +85,33 @@ export default function ChatsManagement() {
     }, [selectedCustomer]);
 
     const filteredCustomers = useMemo(() => {
-        const query = searchQuery.toLowerCase();
-        return customers.filter(c =>
-            `${c.firstName} ${c.lastName}`.toLowerCase().includes(query) ||
-            c.email.toLowerCase().includes(query)
-        );
-    }, [customers, searchQuery]);
+        return customers.filter(c => {
+            const query = searchQuery.toLowerCase();
+            const matchesSearch = `${c.firstName} ${c.lastName}`.toLowerCase().includes(query) || c.email.toLowerCase().includes(query);
+            const matchesSource = !sourceFilter || c.source === sourceFilter;
+            
+            const lastMsg = c.chats[0]?.messages.slice(-1)[0];
+            const isAiActive = lastMsg?.role === "assistant";
+            const matchesMode = !modeFilter || (modeFilter === "ai" ? isAiActive : !isAiActive);
+
+            // Date filtering logic
+            if (!lastMsg) return false;
+            const now = new Date();
+            const diffDays = (now.getTime() - lastMsg.createdAt.getTime()) / (1000 * 3600 * 24);
+            if (dateFilter === "recent" && diffDays > 1) return false;
+            if (dateFilter === "7days" && diffDays > 7) return false;
+            if (dateFilter === "30days" && diffDays > 30) return false;
+
+            return matchesSearch && matchesSource && matchesMode;
+        });
+    }, [customers, searchQuery, sourceFilter, modeFilter, dateFilter]);
 
     const formatTime = (date: Date) => {
         return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     };
 
     const handleAiSuggest = () => {
-        const suggestions = [
-            "I've checked your order and it's currently in transit. You should receive it by Tuesday!",
-            "I'm sorry for the delay. I've expedited your request to our fulfillment team.",
-            "Can you please provide your order number so I can assist you better?"
-        ];
-        setReplyText(suggestions[Math.floor(Math.random() * suggestions.length)]);
+        setReplyText("I've checked your order and it's currently in transit!");
     };
 
     return (
@@ -194,7 +131,12 @@ export default function ChatsManagement() {
                     setSelectedCustomerId={setSelectedCustomerId}
                     searchQuery={searchQuery}
                     setSearchQuery={setSearchQuery}
-                    aiEnabled={aiEnabled}
+                    sourceFilter={sourceFilter}
+                    setSourceFilter={setSourceFilter}
+                    modeFilter={modeFilter}
+                    setModeFilter={setModeFilter}
+                    dateFilter={dateFilter}
+                    setDateFilter={setDateFilter}
                     formatTime={formatTime}
                 />
 
@@ -213,70 +155,109 @@ export default function ChatsManagement() {
     );
 }
 
+// ============================================================================
+// SUB-COMPONENT: SIDEBAR
+// ============================================================================
 
-function CustomerSidebar({
+export function CustomerSidebar({
     customers,
     selectedCustomerId,
     setSelectedCustomerId,
     searchQuery,
     setSearchQuery,
-    aiEnabled,
-    formatTime
+    sourceFilter,
+    setSourceFilter,
+    modeFilter,
+    setModeFilter,
+    dateFilter,
+    setDateFilter,
+    formatTime,
 }: CustomerSidebarProps) {
     return (
-        <div style={{ background: "var(--p-color-bg-surface-secondary)", borderRight: "1px solid var(--p-color-border)" }}>
+        <s-box background="subdued" borderStyle="none solid none none">
+            {/* Fix: Wrapped s-stack in a div to handle height since s-stack doesn't take 'style' */}
             <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-                {/* Search Header */}
-                <div style={{ padding: "1rem", borderBottom: "1px solid var(--p-color-border)" }}>
-                    <s-search-field
-                        placeholder="Search customers..."
-                        value={searchQuery}
-                        onInput={(e: CallbackEvent<"s-search-field">) => setSearchQuery(e.currentTarget.value)}
-                    />
-                </div>
+                <s-stack gap="none">
+                    <s-box padding="base" borderStyle="none none solid none">
+                        <s-grid gridTemplateColumns="1fr auto" gap="small" alignItems="center">
+                            <s-search-field
+                                placeholder="Search..."
+                                value={searchQuery}
+                                onInput={(e: CallbackEvent<"s-search-field">) => setSearchQuery(e.currentTarget.value)}
+                            />
+                            <s-button icon="filter" variant="secondary" commandFor="sidebar-filters"></s-button>
+                            <s-popover id="sidebar-filters" minInlineSize="250px">
+                                <s-box padding="base">
+                                    <s-stack gap="base">
+                                        <s-choice-list
+                                            label="Last Message"
+                                            values={[dateFilter]}
+                                            onChange={(e: CallbackEvent<"s-choice-list">) => setDateFilter(e.currentTarget.value || "all")}
+                                        >
+                                            <s-choice value="all">All time</s-choice>
+                                            <s-choice value="recent">Today</s-choice>
+                                            <s-choice value="7days">Last 7 days</s-choice>
+                                            <s-choice value="30days">Last 30 days</s-choice>
+                                        </s-choice-list>
+                                        <s-divider />
+                                        <s-choice-list
+                                            label="Source"
+                                            values={[sourceFilter]}
+                                            onChange={(e: CallbackEvent<"s-choice-list">) => setSourceFilter(e.currentTarget.value || "")}
+                                        >
+                                            <s-choice value="">All Sources</s-choice>
+                                            <s-choice value="SHOPIFY">Shopify</s-choice>
+                                            <s-choice value="WEBSITE">Website</s-choice>
+                                        </s-choice-list>
+                                        <s-divider />
+                                        <s-choice-list
+                                            label="Mode"
+                                            values={[modeFilter]}
+                                            onChange={(e: CallbackEvent<"s-choice-list">) => setModeFilter(e.currentTarget.value || "")}
+                                        >
+                                            <s-choice value="">All Modes</s-choice>
+                                            <s-choice value="ai">AI Active</s-choice>
+                                            <s-choice value="manual">Manual</s-choice>
+                                        </s-choice-list>
+                                    </s-stack>
+                                </s-box>
+                            </s-popover>
+                        </s-grid>
+                    </s-box>
 
-                {/* Scrollable Customer List */}
-                <div style={{ flex: 1, overflowY: "auto" }}>
-                    {customers.length === 0 ? (
-                        <div style={{ padding: "1rem" }}>
-                            <s-text color="subdued">No customers found</s-text>
-                        </div>
-                    ) : (
-                        customers.map(customer => {
-                            const isSelected = customer.id === selectedCustomerId;
+                    <div style={{ flex: 1, overflowY: "auto" }}>
+                        {customers.map((customer) => {
                             const lastMsg = customer.chats[0]?.messages.slice(-1)[0];
+                            const isAiMode = lastMsg?.role === "assistant";
                             return (
                                 <s-clickable key={customer.id} onClick={() => setSelectedCustomerId(customer.id)}>
-                                    <div style={{ 
-                                        padding: "1rem", 
-                                        background: isSelected ? "var(--p-color-bg-surface-selected)" : "transparent",
-                                        borderBottom: "1px solid var(--p-color-border)"
-                                    }}>
+                                    <s-box padding="base" background={customer.id === selectedCustomerId ? "strong" : undefined} borderStyle="none none solid none">
                                         <s-stack gap="small-100">
                                             <s-grid gridTemplateColumns="1fr auto" alignItems="center">
                                                 <s-heading>{customer.firstName} {customer.lastName}</s-heading>
-                                                <s-text color="subdued">{lastMsg ? formatTime(lastMsg.createdAt) : ""}</s-text>
+                                                <s-text tone="neutral">{lastMsg ? formatTime(lastMsg.createdAt) : ""}</s-text>
                                             </s-grid>
                                             <div style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                                <s-text color="subdued">
-                                                    {lastMsg?.content || "No history"}
-                                                </s-text>
+                                                <s-text tone="neutral">{lastMsg?.content || "No history"}</s-text>
                                             </div>
-                                            <s-badge tone={aiEnabled ? "success" : "neutral"}>
-                                                {aiEnabled ? "AI Active" : "Manual"}
+                                            <s-badge tone={isAiMode ? "success" : "neutral"}>
+                                                {isAiMode ? "AI Active" : "Manual"}
                                             </s-badge>
                                         </s-stack>
-                                    </div>
+                                    </s-box>
                                 </s-clickable>
                             );
-                        })
-                    )}
-                </div>
+                        })}
+                    </div>
+                </s-stack>
             </div>
-        </div>
+        </s-box>
     );
 }
 
+// ============================================================================
+// SUB-COMPONENT: CHAT INTERFACE
+// ============================================================================
 
 function ChatInterface({
     customer,
@@ -289,154 +270,8 @@ function ChatInterface({
     formatTime
 }: ChatInterfaceProps) {
     const scrollRef = useRef<HTMLDivElement>(null);
+    const primaryColor = "#D73535";
 
-    // Default styling matching ChatbotPreview (from customization defaults)
-    const defaultStyles: MasterState = {
-        chatWindow: {
-            colorMode: "solid",
-            primaryColor: "#D73535",
-            gradientStart: "#1CB5E0",
-            gradientEnd: "#000851",
-            secondaryColor: "#FF937E",
-            backgroundColor: "#FCF8F8",
-            textColor: "#111F35",
-            secondaryTextColor: "#000000",
-            fontFamily: "Roboto",
-            fontSize: 16,
-            fontWeight: "Regular (400)",
-            width: 350,
-            height: 450,
-            borderRadius: 12
-        },
-        messageBox: {
-            borderRadiusTop: 12,
-            borderRadiusRight: 12,
-            borderRadiusBottom: 12,
-            borderRadiusLeft: 12,
-            messageSpacing: 12,
-            paddingVertical: 12,
-            paddingHorizontal: 14,
-            typingStyle: "In the Msg Box",
-            typingIndicator: "Dots (animated)",
-            timestampDisplay: false
-        },
-        welcome: {
-            greeting: "👋 Welcome! How can I help you today?",
-            quickQuestions: [],
-            quickQuestionPadding: 8,
-            quickQuestionBorderRadius: 20,
-            quickQuestionFontSize: 12,
-            quickQuestionGap: 8,
-            inputPlaceholder: "Type your message here...",
-            sendOnEnter: false
-        },
-        topNav: {
-            avatar: "",
-            botName: "Start Store Assistant",
-            headerHeight: 60,
-            headerContent: "StartStorez",
-            headerFontSize: 15,
-            headerFontWeight: "600",
-            showOnlineStatus: true,
-            onlineStatusType: "Online",
-            customOnlineText: ""
-        },
-        position: {
-            chatButtonPosition: "Left corner",
-            marginRight: 30,
-            marginBottom: 30,
-            zIndex: 2147483647
-        },
-        btnSize: {
-            size: 60,
-            launcherIconName: "message-circle",
-            launcherIconSize: 28
-        },
-        btnAnim: {
-            animationType: "Static",
-            transitionDuration: 300
-        },
-        closeButtonAnim: {
-            animationType: "Fade Out",
-            transitionDuration: 300
-        },
-        footer: {
-            backgroundColor: "#FFFFFF",
-            inputTextColor: "#333333",
-            placeholderColor: "#999999",
-            inputFontSize: 14,
-            inputPaddingVertical: 10,
-            inputPaddingHorizontal: 12,
-            borderTopColor: "#EEEEEE",
-            borderRadiusBottom: 12,
-            sendButtonBackgroundColor: "transparent",
-            sendButtonSize: 32,
-            sendButtonBorderRadius: 8,
-            sendButtonIconColor: "#D73535",
-            sendButtonHoverOpacity: 0.9,
-            sendIconName: "send",
-            sendIconSize: 16
-        },
-        productSlider: {
-            enabled: false,
-            cardWidth: 160,
-            cardHeight: 240,
-            cardPadding: 12,
-            cardBorderRadius: 12,
-            cardGap: 12,
-            imageHeight: 120,
-            imageBorderRadius: 8,
-            titleFontSize: 14,
-            priceFontSize: 14,
-            showPrice: true,
-            showAskButton: true,
-            askButtonSize: 28,
-            askButtonIconColor: "#666666",
-            backgroundColor: "#FFFFFF",
-            borderColor: "#E5E7EB",
-            borderWidth: 1
-        }
-    };
-
-    // Calculate primary theme background (same logic as ChatbotPreview)
-    const primaryThemeBackground = defaultStyles.chatWindow.colorMode === 'gradient'
-        ? `linear-gradient(135deg, ${defaultStyles.chatWindow.gradientStart}, ${defaultStyles.chatWindow.gradientEnd})`
-        : defaultStyles.chatWindow.primaryColor;
-
-    // Shared bubble base style (same as ChatbotPreview)
-    const bubbleBaseStyle: React.CSSProperties = {
-        borderTopLeftRadius: `${defaultStyles.messageBox.borderRadiusTop}px`,
-        borderTopRightRadius: `${defaultStyles.messageBox.borderRadiusRight}px`,
-        borderBottomRightRadius: `${defaultStyles.messageBox.borderRadiusBottom}px`,
-        borderBottomLeftRadius: `${defaultStyles.messageBox.borderRadiusLeft}px`,
-        padding: `${defaultStyles.messageBox.paddingVertical}px ${defaultStyles.messageBox.paddingHorizontal}px`,
-        marginBottom: `${defaultStyles.messageBox.messageSpacing}px`,
-        fontSize: `${defaultStyles.chatWindow.fontSize}px`,
-        fontWeight: defaultStyles.chatWindow.fontWeight,
-        fontFamily: defaultStyles.chatWindow.fontFamily,
-        maxWidth: '85%',
-        wordWrap: "break-word",
-        lineHeight: "1.4",
-        boxShadow: "0 1px 2px rgba(0,0,0,0.1)"
-    };
-
-    // Bot message style (assistant messages)
-    const botMessageStyle: React.CSSProperties = {
-        ...bubbleBaseStyle,
-        background: primaryThemeBackground,
-        color: defaultStyles.chatWindow.textColor || "#ffffff",
-        alignSelf: "flex-start",
-    };
-
-    // User message style
-    const userMessageStyle: React.CSSProperties = {
-        ...bubbleBaseStyle,
-        background: defaultStyles.chatWindow.secondaryColor || "#f1f1f1",
-        color: defaultStyles.chatWindow.secondaryTextColor || "#000000",
-        alignSelf: "flex-end",
-    };
-
-    // Auto-scroll to bottom on new messages
     useEffect(() => {
         if (scrollRef.current) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -446,36 +281,18 @@ function ChatInterface({
     if (!customer) {
         return (
             <div style={{ display: "flex", height: "100%", alignItems: "center", justifyContent: "center" }}>
-                <s-text color="subdued">Select a customer to start chatting</s-text>
+                <s-text tone="neutral">Select a customer to start chatting</s-text>
             </div>
         );
     }
 
     return (
-        <div style={{ display: "flex", flexDirection: "column", height: "100%", fontFamily: defaultStyles.chatWindow.fontFamily }}>
-            {/* Chat Header */}
-            <div style={{ 
-                padding: "1rem", 
-                borderBottom: "1px solid var(--p-color-border)",
-                background: primaryThemeBackground,
-                color: "#fff"
-            }}>
+        <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+            <div style={{ padding: "1rem", borderBottom: "1px solid var(--p-color-border)", background: primaryColor, color: "#fff" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div>
-                        <div style={{ fontWeight: 600, fontSize: "16px", marginBottom: "4px" }}>
-                            {customer.firstName} {customer.lastName}
-                        </div>
-                        <div style={{ fontSize: "12px", opacity: 0.9, display: "flex", gap: "8px", alignItems: "center" }}>
-                            <span>{customer.email}</span>
-                            <span style={{ 
-                                background: "rgba(255,255,255,0.2)", 
-                                padding: "2px 8px", 
-                                borderRadius: "12px",
-                                fontSize: "10px"
-                            }}>
-                                {customer.source}
-                            </span>
-                        </div>
+                        <div style={{ fontWeight: 600 }}>{customer.firstName} {customer.lastName}</div>
+                        <div style={{ fontSize: "12px", opacity: 0.9 }}>{customer.email} | {customer.source}</div>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                         <span style={{ fontSize: "14px" }}>AI Agent</span>
@@ -484,93 +301,84 @@ function ChatInterface({
                 </div>
             </div>
 
-            {/* Message Feed - styled like ChatbotPreview */}
-            <div 
-                ref={scrollRef} 
-                style={{ 
-                    flex: 1, 
-                    overflowY: "auto", 
-                    padding: "20px", 
-                    display: "flex", 
-                    flexDirection: "column",
-                    backgroundColor: defaultStyles.chatWindow.backgroundColor || "#ffffff"
-                }}
-            >
+            <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "20px", display: "flex", flexDirection: "column", backgroundColor: "#FCF8F8" }}>
                 {messages.map(msg => {
                     const isUser = msg.role === "user";
-                    const messageStyle = isUser ? userMessageStyle : botMessageStyle;
-                    
                     return (
-                        <div 
-                            key={msg.id} 
-                            style={{ 
-                                display: 'flex', 
-                                flexDirection: 'column', 
-                                alignItems: isUser ? 'flex-end' : 'flex-start', 
-                                width: '100%',
-                                marginBottom: defaultStyles.messageBox.messageSpacing
-                            }}
-                        >
-                            <div style={messageStyle}>
-                                {msg.content}
+                        <div key={msg.id} style={{
+                            alignSelf: isUser ? "flex-end" : "flex-start",
+                            backgroundColor: isUser ? "#FF937E" : primaryColor,
+                            color: isUser ? "#000" : "#fff",
+                            padding: "10px 14px",
+                            borderRadius: "12px",
+                            marginBottom: "12px",
+                            maxWidth: "80%",
+                            boxShadow: "0 1px 2px rgba(0,0,0,0.1)"
+                        }}>
+                            <div>{msg.content}</div>
+                            <div style={{ fontSize: "10px", marginTop: "4px", opacity: 0.8, textAlign: isUser ? "right" : "left" }}>
+                                {formatTime(msg.createdAt)}
                             </div>
-                            {defaultStyles.messageBox.timestampDisplay && (
-                                <span style={{ 
-                                    fontSize: '10px', 
-                                    color: '#999', 
-                                    marginTop: '4px',
-                                    marginLeft: isUser ? 0 : 5,
-                                    marginRight: isUser ? 5 : 0
-                                }}>
-                                    {formatTime(msg.createdAt)}
-                                </span>
-                            )}
                         </div>
                     );
                 })}
             </div>
 
-            {/* Sticky Reply Composer - styled like ChatbotPreview footer */}
-            <div style={{ 
-                padding: "15px", 
-                borderTop: "1px solid #eee", 
-                display: "flex", 
-                flexDirection: "column",
-                gap: "10px",
-                background: "#fff"
-            }}>
+            <div style={{ padding: "15px", borderTop: "1px solid #eee", background: "#fff" }}>
                 <textarea
                     rows={3}
-                    placeholder={defaultStyles.welcome.inputPlaceholder || `Message ${customer.firstName}...`}
+                    placeholder="Type your message..."
                     value={replyText}
                     onChange={(e) => setReplyText(e.target.value)}
-                    style={{
-                        width: "100%",
-                        border: "none",
-                        outline: "none",
-                        fontSize: "14px",
-                        fontFamily: defaultStyles.chatWindow.fontFamily,
-                        color: "#333",
-                        resize: "none",
-                        padding: "8px"
-                    }}
+                    style={{ width: "100%", border: "1px solid #ccc", borderRadius: "4px", padding: "8px", marginBottom: "10px", resize: "none", outline: "none" }}
                 />
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <div style={{ fontSize: "12px" }}>
-                        <s-text color="subdued">
-                            {aiEnabled ? "AI will auto-reply." : "Manual mode active."}
-                        </s-text>
-                    </div>
+                    <s-text tone="neutral">{aiEnabled ? "AI auto-reply on" : "Manual mode"}</s-text>
                     <div style={{ display: "flex", gap: "8px" }}>
-                        <s-button variant="secondary" onClick={handleAiSuggest} disabled={!aiEnabled}>
-                            AI Suggest Reply
-                        </s-button>
-                        <s-button variant="primary" disabled={!replyText.trim()} onClick={() => setReplyText("")}>
-                            Send
-                        </s-button>
+                        <s-button variant="secondary" onClick={handleAiSuggest} disabled={!aiEnabled}>AI Suggest</s-button>
+                        <s-button variant="primary" onClick={() => setReplyText("")} disabled={!replyText.trim()}>Send</s-button>
                     </div>
                 </div>
             </div>
         </div>
     );
 }
+
+// ============================================================================
+// MOCK DATA GENERATOR
+// ============================================================================
+
+const generateMockCustomers = (): Customer[] => {
+    const customers: Customer[] = [];
+    const sources = ["SHOPIFY", "WEBSITE", "MANUAL"];
+    const firstNames = ["John", "Sarah", "Michael", "Emily", "David", "Jessica"];
+    const lastNames = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia"];
+
+    for (let i = 0; i < 15; i++) {
+        const firstName = firstNames[i % firstNames.length];
+        const lastName = lastNames[i % lastNames.length];
+        const email = `${firstName.toLowerCase()}.${lastName.toLowerCase()}${i}@example.com`;
+
+        customers.push({
+            id: `customer-${i}`,
+            shopifyId: `gid://shopify/Customer/${1000 + i}`,
+            email,
+            firstName,
+            lastName,
+            phone: `+1-555-010${i}`,
+            source: sources[i % sources.length],
+            createdAt: new Date(),
+            chats: [{
+                id: `session-${i}`,
+                customerId: `customer-${i}`,
+                isGuest: false,
+                createdAt: new Date(),
+                messages: [
+                    { id: `msg-${i}-1`, content: "I'm looking for an update on my order.", role: "user", createdAt: new Date(Date.now() - 3600000) },
+                    { id: `msg-${i}-2`, content: "I'd be happy to help with that!", role: "assistant", createdAt: new Date(Date.now() - 1800000) }
+                ]
+            }],
+        });
+    }
+    return customers;
+};
