@@ -118,11 +118,22 @@ model ChatSession {
 }
 
 model Message {
-  id        String   @id @default(uuid())
-  content   String
-  role      String // "user", "assistant", or "system"
-  createdAt DateTime @default(now())
+    id        String   @id @default(uuid())
+    content   String
+    role      String // "user", "assistant", or "system"
+    createdAt DateTime @default(now())
 
-  sessionId String
-  session   ChatSession @relation(fields: [sessionId], references: [id])
+    sessionId String
+    session   ChatSession @relation(fields: [sessionId], references: [id])
+}
+
+// Chatbot Customization/Appearance Settings
+model ChatbotCustomization {
+    id        String   @id @default(uuid())
+    shop      String   @unique // One customization per shop
+    settings  Json     // Stores the complete MasterState as JSON
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@index([shop])
 }

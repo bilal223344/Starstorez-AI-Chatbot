@@ -12,7 +12,12 @@ import {
     PresetTemplates,
     ProductSliderStyling
 } from "app/components/CustomizationAndAppearance/index"
-import { useState } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useFetcher, useLoaderData, LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
+import { authenticate } from "app/shopify.server";
+import prisma from "app/db.server";
+import { useAppBridge } from "@shopify/app-bridge-react";
+import { Prisma } from "@prisma/client";
 
 
 export interface MasterState {
@@ -135,10 +140,96 @@ export interface MasterState {
 }
 
 
-export default function Customization() {
-    const [presetKey, setPresetKey] = useState(0);
+// ============================================================================
+// LOADER - Fetch saved customization from database
+// ============================================================================
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+    const { session } = await authenticate.admin(request);
+    
+    if (!session?.shop) {
+        return { customization: null };
+    }
 
-    const [formData, setFormData] = useState<MasterState>({
+    try {
+        const customization = await prisma.chatbotCustomization.findUnique({
+            where: { shop: session.shop },
+            select: {
+                settings: true,
+                updatedAt: true
+            }
+        });
+
+        return {
+            customization: customization?.settings as MasterState | null,
+            updatedAt: customization?.updatedAt || null
+        };
+    } catch (error) {
+        console.error("[LOADER] Error fetching customization:", error);
+        return { customization: null };
+    }
+};
+
+// ============================================================================
+// ACTION - Save customization settings to database
+// ============================================================================
+export const action = async ({ request }: ActionFunctionArgs) => {
+    const { session } = await authenticate.admin(request);
+    
+    if (!session?.shop) {
+        return { error: "Unauthorized" };
+    }
+
+    try {
+        const body = await request.json();
+        // Handle both stringified JSON and direct object
+        const settings: MasterState = typeof body.settings === 'string' 
+            ? JSON.parse(body.settings) 
+            : body.settings;
+
+        if (!settings) {
+            return { error: "Settings data is required" };
+        }
+
+        // Validate that settings is an object
+        if (typeof settings !== "object" || Array.isArray(settings)) {
+            return { error: "Invalid settings format" };
+        }
+
+        // Convert MasterState to Prisma JSON format
+        const settingsJson = JSON.parse(JSON.stringify(settings)) as unknown as Prisma.InputJsonValue;
+        
+        await prisma.chatbotCustomization.upsert({
+            where: { shop: session.shop },
+            create: {
+                shop: session.shop,
+                settings: settingsJson
+            },
+            update: {
+                settings: settingsJson,
+                updatedAt: new Date()
+            }
+        });
+
+        return { success: true, message: "Customization settings saved successfully" };
+    } catch (error) {
+        console.error("[ACTION] Error saving customization:", error);
+        return { error: "Failed to save customization settings" };
+    }
+};
+
+// ============================================================================
+// COMPONENT
+// ============================================================================
+export default function Customization() {
+    const loaderData = useLoaderData<typeof loader>();
+    const fetcher = useFetcher();
+    const shopify = useAppBridge();
+    const [presetKey, setPresetKey] = useState(0);
+    const [isSaving, setIsSaving] = useState(false);
+
+    // Initialize formData from loader or use defaults
+    const [formData, setFormData] = useState<MasterState>(() => {
+        return loaderData.customization || {
         chatWindow: {
             colorMode: "solid",
             primaryColor: "#D73535",
@@ -247,21 +338,71 @@ export default function Customization() {
             backgroundColor: "#FFFFFF",
             borderColor: "#E5E7EB",
             borderWidth: 1
-        }
-    });
+        },
+    }});
 
     const handleUpdate = (section: keyof MasterState, key: string, value: string | number | boolean | string[]) => {
-        setFormData((prev) => ({
-            ...prev,
-            [section]: {
-                ...prev[section],
-                [key]: value,
-            },
-        }));
+        setFormData((prev) => {
+            const updated = {
+                ...prev,
+                [section]: {
+                    ...prev[section],
+                    [key]: value,
+                },
+            };
+            
+            // Auto-save to database (debounced)
+            debouncedSave(updated);
+            
+            return updated;
+        });
 
         // Console log to verify data flow
         console.log(`Updated ${section}.${key} to:`, value);
     };
+
+    // Save customization to database
+    const saveCustomization = useCallback(async (data: MasterState) => {
+        setIsSaving(true);
+        try {
+            fetcher.submit(
+                { settings: JSON.stringify(data) },
+                {
+                    method: "POST",
+                    encType: "application/json"
+                }
+            );
+        } catch (error) {
+            console.error("[SAVE] Error saving customization:", error);
+            shopify.toast.show("Failed to save customization", { isError: true });
+            setIsSaving(false);
+        }
+    }, [fetcher, shopify]);
+
+    // Debounced save function to avoid too many API calls
+    const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const debouncedSave = useCallback((data: MasterState) => {
+        if (saveTimeoutRef.current) {
+            clearTimeout(saveTimeoutRef.current);
+        }
+        
+        saveTimeoutRef.current = setTimeout(() => {
+            saveCustomization(data);
+        }, 1000); // Save 1 second after last change
+    }, [saveCustomization]);
+
+    // Show toast on save success/error
+    useEffect(() => {
+        if (fetcher.data) {
+            if (fetcher.data.error) {
+                shopify.toast.show(fetcher.data.error, { isError: true });
+                setIsSaving(false);
+            } else if (fetcher.data.success) {
+                shopify.toast.show("Customization saved successfully");
+                setIsSaving(false);
+            }
+        }
+    }, [fetcher.data, shopify]);
 
     const handleApplyPreset = (preset: MasterState) => {
         setFormData(preset);
@@ -271,6 +412,11 @@ export default function Customization() {
 
     return (
         <s-page heading="Customization & Appearance" inlineSize="large">
+            {isSaving && (
+                <s-banner tone="info">
+                    Saving customization...
+                </s-banner>
+            )}
             <s-grid gridTemplateColumns="8fr 5fr" gap="large">
                 <s-stack gap="base">
 
