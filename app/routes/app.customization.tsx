@@ -63,7 +63,7 @@ export interface MasterState {
     };
     welcome: {
         greeting: string;
-        quickQuestions: string[]; // Array of strings
+        quickQuestions: string[];
         inputPlaceholder: string;
         sendOnEnter: boolean;
         quickQuestionPadding: number;

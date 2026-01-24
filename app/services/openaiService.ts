@@ -161,7 +161,7 @@ export const generateAIResponse = async (
                 max_tokens: 1000
             })
         });
-
+        console.log("[response]", response);
         if (!response.ok) {
             const error = await response.json();
             const errorMessage = error?.error?.message || "Unknown error";
