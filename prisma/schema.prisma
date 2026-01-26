@@ -152,3 +152,108 @@ model AISettings {
 
     @@index([shop])
 }
+
+// Subscription Plans/Tiers
+model MerchantPlan {
+    id                String   @id @default(uuid())
+    name              String   @unique // "Free", "Basic", "Pro", "Enterprise"
+    monthlyCredits    Int      // Credits per month
+    maxConcurrentChats Int     // Max simultaneous chats
+    price             Float    // Monthly price in USD
+    features          Json     // Additional features as JSON
+    isActive          Boolean  @default(true)
+    createdAt         DateTime @default(now())
+
+    merchants MerchantCredits[]
+}
+
+// Credit Management per Merchant
+model MerchantCredits {
+    id              String   @id @default(uuid())
+    shop            String   @unique // One record per shop
+    planId          String
+    plan            MerchantPlan @relation(fields: [planId], references: [id])
+    
+    // Credits
+    totalCredits    Int      @default(0) // Total credits for current period
+    usedCredits     Int      @default(0) // Credits consumed
+    remainingCredits Int     @default(0) // Calculated: totalCredits - usedCredits
+    
+    // Usage tracking
+    totalRequests   Int      @default(0) // Total API requests made
+    totalUsers      Int      @default(0) // Total unique users served
+    
+    // Billing period
+    periodStart     DateTime @default(now())
+    periodEnd       DateTime
+    
+    // Control flags
+    aiEnabled       Boolean  @default(true)  // Manual override for AI responses
+    autoRecharge    Boolean  @default(true)  // Auto-recharge when period resets
+    
+    createdAt       DateTime @default(now())
+    updatedAt       DateTime @updatedAt
+
+    usageLogs       UsageLog[]
+
+    @@index([shop])
+    @@index([planId])
+}
+
+// Usage Logging for Analytics & Billing
+model UsageLog {
+    id              String   @id @default(uuid())
+    shop            String
+    merchantCreditsId String
+    merchantCredits MerchantCredits @relation(fields: [merchantCreditsId], references: [id])
+    
+    // Request details
+    requestType     String   // "AI_CHAT", "KEYWORD_RESPONSE", "MANUAL_HANDOFF"
+    creditsUsed     Int      @default(1) // Credits consumed for this request
+    
+    // Context
+    sessionId       String?  // Chat session ID
+    customerId      String?  // Customer who made request
+    userMessage     String?  // User's message (truncated for privacy)
+    
+    // Performance metrics
+    responseTime    Int?     // Response time in milliseconds
+    tokensUsed      Int?     // OpenAI tokens consumed (if applicable)
+    
+    // Error tracking
+    wasSuccessful   Boolean  @default(true)
+    errorMessage    String?
+    
+    createdAt       DateTime @default(now())
+
+    @@index([shop, createdAt])
+    @@index([merchantCreditsId])
+    @@index([requestType])
+}
+
+// Chat Configuration per Shop
+model ChatConfiguration {
+    id                    String   @id @default(uuid())
+    shop                  String   @unique
+    
+    // AI Control
+    aiEnabled             Boolean  @default(true)
+    autoHandoffEnabled    Boolean  @default(true) // Auto-switch to manual when credits exhausted
+    
+    // Response optimization
+    useKeywordResponses   Boolean  @default(true) // Use direct responses for common queries
+    maxTokensPerResponse  Int      @default(500)  // Limit OpenAI token usage
+    
+    // Load balancing
+    maxConcurrentRequests Int      @default(5)    // Max simultaneous requests per shop
+    rateLimitPerMinute    Int      @default(60)   // Requests per minute limit
+    
+    // Emergency settings
+    fallbackMessage       String?  // Message when AI is unavailable
+    manualChatNotification String? // Notify merchant of manual chat requests
+    
+    createdAt             DateTime @default(now())
+    updatedAt             DateTime @updatedAt
+
+    @@index([shop])
+}

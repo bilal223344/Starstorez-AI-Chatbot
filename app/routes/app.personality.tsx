@@ -6,7 +6,7 @@ import { RecommendedProducts, Product } from "app/components/AIPersonalityAndBeh
 import { ResponseSettings, ResponseSettingsData } from "app/components/AIPersonalityAndBehavior/ResponseSettings";
 import { ResponseTone, ResponseToneData } from "app/components/AIPersonalityAndBehavior/ResponseTone";
 import { StoreDetails, StoreDetailsData } from "app/components/AIPersonalityAndBehavior/StoreDetails";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useFetcher, useLoaderData, LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import { authenticate } from "app/shopify.server";
 import prisma from "app/db.server";
@@ -33,7 +33,7 @@ export interface AISettingsState {
 // ============================================================================
 export const loader = async ({ request }: LoaderFunctionArgs) => {
     const { session } = await authenticate.admin(request);
-    
+
     if (!session?.shop) {
         return { aiSettings: null };
     }
@@ -62,7 +62,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 // ============================================================================
 export const action = async ({ request }: ActionFunctionArgs) => {
     const { session } = await authenticate.admin(request);
-    
+
     if (!session?.shop) {
         return { error: "Unauthorized" };
     }
@@ -70,8 +70,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     try {
         const body = await request.json();
         // Handle both stringified JSON and direct object
-        const settings: AISettingsState = typeof body.settings === 'string' 
-            ? JSON.parse(body.settings) 
+        const settings: AISettingsState = typeof body.settings === 'string'
+            ? JSON.parse(body.settings)
             : body.settings;
 
         if (!settings) {
@@ -85,7 +85,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         // Convert AISettingsState to Prisma JSON format
         const settingsJson = JSON.parse(JSON.stringify(settings)) as unknown as Prisma.InputJsonValue;
-        
+
         await prisma.aISettings.upsert({
             where: { shop: session.shop },
             create: {
@@ -113,22 +113,22 @@ export default function AIPersonalityAndBehavior() {
     const [isSaving, setIsSaving] = useState(false);
 
     // Initialize state from loader or use defaults
-    const [aiInstructions, setAiInstructions] = useState(() => 
+    const [aiInstructions, setAiInstructions] = useState(() =>
         (loaderData.aiSettings?.aiInstructions || "") as string
     );
 
-    const [recommentProducts, setRecommentProducts] = useState<Product[]>(() => 
+    const [recommentProducts, setRecommentProducts] = useState<Product[]>(() =>
         loaderData.aiSettings?.recommendedProducts || []
     );
 
-    const [storeDetails, setStoreDetails] = useState<StoreDetailsData>(() => 
+    const [storeDetails, setStoreDetails] = useState<StoreDetailsData>(() =>
         loaderData.aiSettings?.storeDetails || {
             about: "",
             location: ""
         }
     );
 
-    const [policies, setPolicies] = useState<PoliciesData>(() => 
+    const [policies, setPolicies] = useState<PoliciesData>(() =>
         loaderData.aiSettings?.policies || {
             shipping: "",
             payment: "",
@@ -136,29 +136,29 @@ export default function AIPersonalityAndBehavior() {
         }
     );
 
-    const [newArrivals, setNewArrivals] = useState<Product[]>(() => 
+    const [newArrivals, setNewArrivals] = useState<Product[]>(() =>
         loaderData.aiSettings?.newArrivals || []
     );
 
-    const [bestSellers, setBestSellers] = useState<Product[]>(() => 
+    const [bestSellers, setBestSellers] = useState<Product[]>(() =>
         loaderData.aiSettings?.bestSellers || []
     );
 
-    const [responseTone, setResponseTone] = useState<ResponseToneData>(() => 
+    const [responseTone, setResponseTone] = useState<ResponseToneData>(() =>
         loaderData.aiSettings?.responseTone || {
             selectedTone: ['professional'],
             customInstructions: "Speak in a calm and friendly tone."
         }
     );
 
-    const [languageSettings, setLanguageSettings] = useState<LanguageSettingsData>(() => 
+    const [languageSettings, setLanguageSettings] = useState<LanguageSettingsData>(() =>
         loaderData.aiSettings?.languageSettings || {
             primaryLanguage: "english",
             autoDetect: true
         }
     );
 
-    const [responseSettings, setResponseSettings] = useState<ResponseSettingsData>(() => 
+    const [responseSettings, setResponseSettings] = useState<ResponseSettingsData>(() =>
         loaderData.aiSettings?.responseSettings || {
             length: ['balanced'],
             style: ['emojis']
@@ -207,33 +207,7 @@ export default function AIPersonalityAndBehavior() {
         shopify
     ]);
 
-    // Debounced save function to avoid too many API calls
-    const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-    const debouncedSave = useCallback(() => {
-        if (saveTimeoutRef.current) {
-            clearTimeout(saveTimeoutRef.current);
-        }
-        
-        saveTimeoutRef.current = setTimeout(() => {
-            saveAISettings();
-        }, 1000); // Save 1 second after last change
-    }, [saveAISettings]);
-
-    // Auto-save when any setting changes
-    useEffect(() => {
-        debouncedSave();
-    }, [
-        aiInstructions,
-        recommentProducts,
-        storeDetails,
-        policies,
-        newArrivals,
-        bestSellers,
-        responseTone,
-        languageSettings,
-        responseSettings,
-        debouncedSave
-    ]);
+    // Manual save only - no auto-save
 
     // Show toast on save success/error
     useEffect(() => {
@@ -254,6 +228,16 @@ export default function AIPersonalityAndBehavior() {
 
     return (
         <s-page heading="AI Personality & Behavior" inlineSize="large">
+
+            <s-button 
+                slot="primary-action" 
+                onClick={() => saveAISettings()}
+                loading={isSaving}
+                disabled={isSaving}
+            >
+                {isSaving ? "Saving..." : "Save AI Settings"}
+            </s-button>
+
             {/* AI Instructions */}
             <s-section>
                 <s-stack gap="small-200">

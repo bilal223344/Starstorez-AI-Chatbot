@@ -1,9 +1,85 @@
-import { generateEmbeddings } from "./pineconeService";
-import { checkPineconeNamespace } from "./pineconeService";
+import { generateEmbeddings, checkPineconeNamespace } from "./pineconeService";
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const PINECONE_API_KEY = process.env.PINECONE_API_KEY || "";
 const INDEX_HOST = process.env.INDEX_HOST || "";
+
+// ============================================================================
+// Helper function to handle rate limiting and retries
+// ============================================================================
+const queryPineconeWithRetry = async (url: string, options: RequestInit, maxRetries: number = 3): Promise<Response> => {
+    let lastError: Error | null = null;
+    
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+            const response = await fetch(url, options);
+            
+            // If rate limited (429), wait and retry
+            if (response.status === 429) {
+                const retryAfter = response.headers.get('retry-after');
+                const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : Math.pow(2, attempt) * 1000; // Exponential backoff
+                
+                console.warn(`[Pinecone] Rate limited, waiting ${waitTime}ms before retry ${attempt + 1}/${maxRetries}`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+                continue;
+            }
+            
+            return response;
+        } catch (error) {
+            lastError = error instanceof Error ? error : new Error(String(error));
+            
+            if (attempt < maxRetries - 1) {
+                const waitTime = Math.pow(2, attempt) * 1000; // Exponential backoff
+                console.warn(`[Pinecone] Request failed, retrying in ${waitTime}ms (attempt ${attempt + 1}/${maxRetries}):`, error);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+            }
+        }
+    }
+    
+    throw lastError || new Error("Max retries exceeded");
+};
+
+// Helper function for OpenAI API with retry logic
+const openaiApiWithRetry = async (url: string, options: RequestInit, maxRetries: number = 3): Promise<Response> => {
+    let lastError: Error | null = null;
+    
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+            const response = await fetch(url, options);
+            
+            // If rate limited (429), check if we should retry or fail fast
+            if (response.status === 429) {
+                const errorBody = await response.text();
+                const retryAfter = response.headers.get('retry-after');
+                const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : Math.pow(2, attempt + 1) * 2000; // Longer backoff
+                
+                console.warn(`[OpenAI] Rate limited (attempt ${attempt + 1}/${maxRetries}): ${errorBody}`);
+                
+                // If this is the last attempt, don't wait - just fail
+                if (attempt === maxRetries - 1) {
+                    console.error(`[OpenAI] Persistent rate limiting after ${maxRetries} attempts`);
+                    throw new Error("QUOTA_EXCEEDED");
+                }
+                
+                console.warn(`[OpenAI] Waiting ${waitTime}ms before retry`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+                continue;
+            }
+            
+            return response;
+        } catch (error) {
+            lastError = error instanceof Error ? error : new Error(String(error));
+            
+            if (attempt < maxRetries - 1) {
+                const waitTime = Math.pow(2, attempt + 1) * 1000; // Exponential backoff
+                console.warn(`[OpenAI] Request failed, retrying in ${waitTime}ms (attempt ${attempt + 1}/${maxRetries}):`, error);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+            }
+        }
+    }
+    
+    throw lastError || new Error("Max retries exceeded for OpenAI API");
+};
 
 // ============================================================================
 // Query Pinecone for relevant products/orders
@@ -26,8 +102,8 @@ export const queryPinecone = async (
         const embeddings = await generateEmbeddings([queryText]);
         const queryVector = embeddings[0];
 
-        // Query Pinecone
-        const response = await fetch(`${INDEX_HOST}/query`, {
+        // Query Pinecone with retry logic
+        const response = await queryPineconeWithRetry(`https://${INDEX_HOST}/query`, {
             method: "POST",
             headers: {
                 "Api-Key": PINECONE_API_KEY,
@@ -147,30 +223,51 @@ export const generateAIResponse = async (
             role: "system" as const,
             content: systemPrompt + (productContext ? `\n\nRelevant Product Information:\n${productContext}` : "")
         };
-
-        const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        console.log("[OpenAI System Message]", systemMessage);
+        const response = await openaiApiWithRetry("https://api.openai.com/v1/chat/completions", {
             method: "POST",
             headers: {
                 "Authorization": `Bearer ${OPENAI_API_KEY}`,
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({
-                model: "gpt-4o-mini", // or "gpt-4" for better quality
+                model: "gpt-4",
                 messages: [systemMessage, ...messages],
                 temperature: 0.7,
                 max_tokens: 1000
             })
         });
-        console.log("[response]", response);
+        console.log("[OpenAI Response Status]", response.status);
         if (!response.ok) {
-            const error = await response.json();
+            const errorText = await response.text();
+            let error;
+            try {
+                error = JSON.parse(errorText);
+            } catch {
+                console.error(`[OpenAI] Failed to parse error response: ${errorText}`);
+                throw new Error(`OpenAI API error (${response.status}): ${errorText}`);
+            }
+            
             const errorMessage = error?.error?.message || "Unknown error";
             const errorCode = error?.error?.code || "unknown";
             const errorType = error?.error?.type || "unknown";
 
+            console.error(`[OpenAI] API Error Details:`, {
+                status: response.status,
+                message: errorMessage,
+                code: errorCode,
+                type: errorType,
+                fullError: error
+            });
+
             // Handle quota exceeded error
             if (errorCode === "insufficient_quota" || errorType === "insufficient_quota") {
                 throw new Error("QUOTA_EXCEEDED");
+            }
+
+            // Handle rate limiting error
+            if (response.status === 429) {
+                throw new Error("QUOTA_EXCEEDED"); // Treat persistent 429 as quota issue
             }
 
             // Handle other API errors
