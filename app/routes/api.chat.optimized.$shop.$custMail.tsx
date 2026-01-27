@@ -1,209 +1,288 @@
+/* app/routes/api.chat.optimized.$shop.$custMail.tsx */
+/**
+ * ============================================================================
+ * PUBLIC CHATBOT API - Entry Point
+ * ============================================================================
+ * 
+ * This is the main entry point for the public chatbot API.
+ * It handles conversations for multiple stores (multi-tenant).
+ * 
+ * Route: /api/chat/optimized/:shop/:custMail
+ * - shop: Store identifier (e.g., "store-name.myshopify.com")
+ * - custMail: Customer email or "guest" for anonymous users
+ * 
+ * Flow:
+ * 1. Validate Input → 2. Check Credits → 3. Check Keywords → 4. AI Processing
+ * 
+ * ============================================================================
+ */
+
 import { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import prisma from "app/db.server";
 import { AISettingsState } from "app/routes/app.personality";
 import { generateAIResponse, queryPinecone } from "app/services/openaiService";
-import { checkCreditsAvailable, recordUsage, UsageMetrics } from "app/services/creditService";
-import { checkKeywordResponse, optimizePrompt } from "app/services/optimizedChatService";
+import { 
+    checkCreditsAvailable, 
+    recordUsage, 
+    UsageMetrics,
+    CreditCheckResult 
+} from "app/services/creditService";
+import { 
+    checkKeywordResponse, 
+    optimizePrompt, 
+    ProductMatchInfo,
+    KeywordResponse 
+} from "app/services/optimizedChatService";
+import { normalizeTypo } from "app/services/intentClassifier";
 
-// Type for Pinecone query results
-interface PineconeMatch {
-    metadata?: Record<string, unknown>;
+// ============================================================================
+// TYPES & INTERFACES
+// ============================================================================
+
+interface ChatResponse {
+    success: boolean;
+    sessionId: string;
+    responseType: "AI" | "KEYWORD" | "MANUAL_HANDOFF";
+    userMessage: MessageFormat;
+    assistantMessage: MessageFormat;
+    products?: ProductData[];
+    remainingCredits?: number;
+    performance?: {
+        responseTime: number;
+        productsFound: number;
+    };
+    error?: string;
+    handoffToManual?: boolean;
+}
+
+interface MessageFormat {
+    id?: string;
+    role: "user" | "assistant" | "system";
+    content: string;
+    createdAt?: string;
+}
+
+interface ProductData {
+    id?: string;
+    title?: string;
+    price?: number;
+    handle?: string;
+    image?: string;
     score?: number;
 }
 
-// Helper function to return JSON responses with CORS
-const json = (data: unknown, init?: ResponseInit) => {
+interface RetrievalResult {
+    productData: ProductData[];
+    pineconeMatches: Array<{
+        metadata?: Record<string, unknown>;
+        score?: number;
+    }>;
+    matchInfo: ProductMatchInfo;
+}
+
+// ============================================================================
+// HELPER: JSON Response with CORS
+// ============================================================================
+
+/**
+ * Creates a JSON response with CORS headers for public API access
+ */
+function createJsonResponse(data: unknown, status: number = 200): Response {
     return new Response(JSON.stringify(data), {
-        ...init,
+        status,
         headers: {
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
             "Access-Control-Allow-Headers": "Content-Type",
-            ...init?.headers,
         },
     });
-};
+}
 
 // ============================================================================
-// GET - Fetch chat history (same as original)
+// LOADER: Fetch Chat History
 // ============================================================================
+
+/**
+ * GET endpoint: Fetches chat history for a session
+ * 
+ * Query params:
+ * - sessionId: Optional session ID to fetch specific session
+ */
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     try {
+        // Step 1: Extract parameters
         const { shop, custMail } = params;
-
+        
+        // Step 2: Validate shop parameter
         if (!shop) {
-            return json({ error: "Shop parameter is required" }, { status: 400 });
+            return createJsonResponse({ error: "Shop parameter is required" }, 400);
         }
 
+        // Step 3: Get session ID from query string
         const url = new URL(request.url);
         const sessionId = url.searchParams.get("sessionId");
 
-        // If custMail is provided and not empty, find customer by email
+        // Step 4: Resolve customer ID if email provided
         let customerId: string | null = null;
-        if (custMail && custMail.trim() !== "" && custMail !== "guest") {
-            const customer = await prisma.customer.findUnique({
-                where: { email: custMail }
+        if (custMail && custMail !== "guest") {
+            const customer = await prisma.customer.findUnique({ 
+                where: { email: custMail } 
             });
             customerId = customer?.id || null;
         }
 
-        let chatSession;
+        // Step 5: Fetch chat session
+        let chatSession = null;
+        
         if (sessionId) {
+            // Try to find session by ID
             chatSession = await prisma.chatSession.findUnique({
                 where: { id: sessionId },
-                include: {
-                    messages: { orderBy: { createdAt: "asc" } },
-                    customer: true
+                include: { 
+                    messages: { orderBy: { createdAt: "asc" } }, 
+                    customer: true 
                 }
             });
-
+            
+            // Verify session belongs to this shop (security check)
             if (chatSession && chatSession.shop !== shop) {
-                return json({ error: "Session does not belong to this shop" }, { status: 403 });
+                return createJsonResponse({ error: "Invalid session" }, 403);
             }
         } else if (customerId) {
+            // Find most recent session for this customer
             chatSession = await prisma.chatSession.findFirst({
-                where: { customerId, shop: shop },
-                include: {
-                    messages: { orderBy: { createdAt: "asc" } },
-                    customer: true
+                where: { customerId, shop },
+                include: { 
+                    messages: { orderBy: { createdAt: "asc" } }, 
+                    customer: true 
                 },
                 orderBy: { createdAt: "desc" }
             });
         }
 
+        // Step 6: Return session data or empty response
         if (!chatSession) {
-            return json({ session: null, messages: [], customer: null });
+            return createJsonResponse({ 
+                session: null, 
+                messages: [], 
+                customer: null 
+            });
         }
 
-        return json({
-            session: {
-                id: chatSession.id,
-                shop: chatSession.shop,
-                customerId: chatSession.customerId,
-                isGuest: chatSession.isGuest,
-                createdAt: chatSession.createdAt
+        return createJsonResponse({
+            session: { 
+                id: chatSession.id, 
+                shop: chatSession.shop, 
+                customerId: chatSession.customerId, 
+                isGuest: chatSession.isGuest 
             },
-            messages: chatSession.messages.map(msg => ({
-                id: msg.id,
-                role: msg.role,
-                content: msg.content,
-                createdAt: msg.createdAt
+            messages: chatSession.messages.map(m => ({
+                id: m.id,
+                role: m.role,
+                content: m.content,
+                createdAt: m.createdAt
             })),
             customer: chatSession.customer
         });
     } catch (error) {
-        console.error("[API] Error fetching chat:", error);
-        return json({ error: "Failed to fetch chat history" }, { status: 500 });
+        console.error("[LOADER] Error fetching chat history:", error);
+        return createJsonResponse({ error: "Failed to fetch chat history" }, 500);
     }
 };
 
 // ============================================================================
-// POST - Optimized AI Chat with Credit System
+// ACTION: Main Chatbot Logic
 // ============================================================================
+
+/**
+ * POST endpoint: Processes user messages and returns AI responses
+ * 
+ * Request body:
+ * - message: User's message text
+ * - sessionId: Optional session ID to continue existing conversation
+ */
 export const action = async ({ request, params }: ActionFunctionArgs) => {
+    // Initialize tracking
     const startTime = Date.now();
     const usageMetrics: UsageMetrics = {
         creditsUsed: 0,
         requestType: "AI_CHAT",
         wasSuccessful: false
     };
-    
+
     try {
+        // ====================================================================
+        // STEP 1: VALIDATE INPUT
+        // ====================================================================
         const { shop, custMail } = params;
-        const customerEmail = custMail ?? undefined;
+        const customerEmail = custMail && custMail !== "guest" ? custMail : undefined;
+        
+        // Parse request body
+        const body = await request.json() as { message?: string; sessionId?: string };
+        const { sessionId } = body;
+        let { message } = body;
 
-        if (!shop) {
-            return json({ error: "Shop parameter is required" }, { status: 400 });
+        // Validate required fields
+        if (!shop || !message) {
+            return createJsonResponse(
+                { error: "Missing required fields: shop and message are required" },
+                400
+            );
         }
 
-        const body = await request.json();
-        const { message, sessionId } = body;
+        // Normalize user input (fix typos like "trak" → "track")
+        message = normalizeTypo(message as string);
 
-        if (!message || typeof message !== "string") {
-            return json({ error: "Message is required" }, { status: 400 });
-        }
-
-        console.log(`[OPTIMIZED] Processing message for shop: ${shop}`);
-
-        // STEP 1: Check credits availability
+        // ====================================================================
+        // STEP 2: CHECK CREDITS
+        // ====================================================================
         const creditCheck = await checkCreditsAvailable(shop);
         
         if (!creditCheck.canProcessRequest) {
-            console.log(`[OPTIMIZED] Credits exhausted for ${shop}: ${creditCheck.reason}`);
-            usageMetrics.requestType = "MANUAL_HANDOFF";
-            usageMetrics.creditsUsed = 0;
-            
-            const handoffMessage = `I'm currently unavailable for AI assistance. ${creditCheck.reason || 'Please contact our support team for help!'}`;
-            
-            // Save messages for manual handling
-            const { userMessage, assistantMessage, chatSession } = await saveUserAndBotMessage(
-                shop, customerEmail, sessionId, message, handoffMessage, true
+            return await handleCreditExhausted(
+                shop,
+                customerEmail,
+                sessionId,
+                message,
+                creditCheck,
+                startTime
             );
-            
-            // Record the handoff event
-            usageMetrics.responseTime = Date.now() - startTime;
-            const customerId = await findCustomerId(customerEmail);
-            await recordUsage(shop, usageMetrics, chatSession.id, customerId ?? undefined, message);
-            
-            return json({
-                success: false,
-                handoffToManual: true,
-                sessionId: chatSession.id,
-                responseType: "MANUAL_HANDOFF",
-                userMessage: formatMessage(userMessage),
-                assistantMessage: formatMessage(assistantMessage),
-                remainingCredits: creditCheck.remainingCredits,
-                error: "CREDITS_EXHAUSTED",
-                errorMessage: handoffMessage
-            });
         }
 
-        // STEP 2: Check for keyword-based direct responses (save costs)
-        const keywordResponse = await checkKeywordResponse(shop, message);
+        // ====================================================================
+        // STEP 3: CHECK KEYWORD RESPONSES (Fast Path)
+        // ====================================================================
+        // This handles simple queries without AI:
+        // - Greetings ("hi", "hello")
+        // - Policies ("shipping policy", "return policy")
+        // - Store info ("what is your store name?")
+        // - Simple product queries ("cheapest products", "best sellers")
         
-        if (keywordResponse.isKeywordMatch && keywordResponse.bypassAI) {
-            console.log(`[OPTIMIZED] Using keyword response for: "${message.substring(0, 30)}..."`);
-            
-            usageMetrics.requestType = "KEYWORD_RESPONSE";
-            usageMetrics.creditsUsed = keywordResponse.creditsUsed;
-            usageMetrics.wasSuccessful = true;
-            
-            // Save messages
-            const { userMessage, assistantMessage, chatSession } = await saveUserAndBotMessage(
-                shop, customerEmail, sessionId, message, keywordResponse.response!, false
+        const keywordRes = await checkKeywordResponse(shop, message);
+        
+        if (keywordRes.isKeywordMatch && keywordRes.bypassAI) {
+            return await handleKeywordResponse(
+                shop,
+                customerEmail,
+                sessionId,
+                message,
+                keywordRes,
+                creditCheck,
+                startTime
             );
-            
-            // Record usage
-            usageMetrics.responseTime = Date.now() - startTime;
-            const customerId = await findCustomerId(customerEmail);
-            await recordUsage(shop, usageMetrics, chatSession.id, customerId ?? undefined, message);
-            
-            return json({
-                success: true,
-                sessionId: chatSession.id,
-                responseType: "KEYWORD",
-                userMessage: formatMessage(userMessage),
-                assistantMessage: formatMessage(assistantMessage),
-                products: keywordResponse.productData || [],
-                remainingCredits: creditCheck.remainingCredits - keywordResponse.creditsUsed,
-                creditsUsed: keywordResponse.creditsUsed,
-                performance: {
-                    responseTime: Date.now() - startTime,
-                    productsFound: keywordResponse.productData?.length || 0,
-                    isProductQuery: true
-                }
-            });
         }
 
-        // STEP 3: Full AI Processing with optimization
-        console.log(`[OPTIMIZED] Using AI response for: "${message.substring(0, 30)}..."`);
+        // ====================================================================
+        // STEP 4: AI PROCESSING (Smart Path)
+        // ====================================================================
+        // If we reach here, the query is complex and needs AI processing
         
+        // Step 4a: Setup session and get conversation history
         const chatSession = await getOrCreateSession(shop, customerEmail, sessionId);
-        const customerId = await findCustomerId(customerEmail);
-
-        // Save user message
-        const userMessage = await prisma.message.create({
+        
+        // Save user message to database
+        await prisma.message.create({
             data: {
                 sessionId: chatSession.id,
                 role: "user",
@@ -211,352 +290,540 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             }
         });
 
-        // Fetch AI settings
-        const aiSettingsRecord = await prisma.aISettings.findUnique({
-            where: { shop: shop }
-        });
-        const aiSettings: AISettingsState | null = aiSettingsRecord?.settings as AISettingsState | null;
-
-        // Prepare conversation history (limited for optimization)
-        const recentMessages = chatSession.messages.slice(-6); // Last 3 exchanges
-        const conversationHistory = recentMessages.map(msg => ({
-            role: msg.role as "user" | "assistant",
-            content: msg.content
+        // Build conversation history (last 12 messages = 6 exchanges)
+        const allMessages = chatSession.messages.map(m => ({
+            role: m.role as "user" | "assistant",
+            content: m.content
         }));
+        const history = [...allMessages, { role: "user" as const, content: message }]
+            .slice(-12);
 
-        // Add current user message
-        conversationHistory.push({
-            role: "user",
-            content: message
-        });
-
-        // Check if this is a product-related query and get product data
-        interface ProductResult { id?: string; title?: string; handle?: string; price?: string; image?: string; score: number }
-        let productData: ProductResult[] = [];
-        let pineconeResults: PineconeMatch[] = [];
-        let productMatchInfo: { hasRelevantResults: boolean; topScore?: number } = { hasRelevantResults: true };
-        const isProductQuery = checkIfProductQuery(message);
-        
-        // Similarity score threshold (CHATBOT-TESTING: don't use low-relevance results)
-        const SIMILARITY_THRESHOLD = 0.65;
-
-        if (isProductQuery) {
-            console.log(`[OPTIMIZED] Product query detected, fetching product data`);
-            try {
-                pineconeResults = await queryPinecone(shop, message, 8);
-                const productsWithScore = pineconeResults
-                    .filter((match: PineconeMatch) => match.metadata?.type === "PRODUCT")
-                    .map((match: PineconeMatch) => ({
-                        id: match.metadata?.product_id as string | undefined,
-                        title: match.metadata?.title as string | undefined,
-                        handle: match.metadata?.handle as string | undefined,
-                        price: match.metadata?.price as string | undefined,
-                        image: match.metadata?.image as string | undefined,
-                        score: (match.score ?? 0) as number
-                    }))
-                    .filter(product => product.title);
-
-                // Filter by similarity: never show irrelevant products (fix Fallback Logic Failure)
-                productData = productsWithScore.filter(p => p.score >= SIMILARITY_THRESHOLD);
-                const topScore = productsWithScore[0]?.score ?? 0;
-                productMatchInfo = {
-                    hasRelevantResults: productData.length > 0,
-                    topScore: productsWithScore.length > 0 ? topScore : undefined
-                };
-
-                // Use only high-score matches for AI context (no irrelevant fallback)
-                pineconeResults = pineconeResults.filter((m) => {
-                    const s = (m.score ?? 0) as number;
-                    return m.metadata?.type === "PRODUCT" && s >= SIMILARITY_THRESHOLD;
-                });
-
-                console.log(`[OPTIMIZED] Found ${productData.length} relevant products (top score: ${topScore?.toFixed(2)}, threshold: ${SIMILARITY_THRESHOLD})`);
-            } catch (error) {
-                console.error("[OPTIMIZED] Error fetching products:", error);
-                productMatchInfo = { hasRelevantResults: false };
-            }
-        }
-
-        // Optimize prompt: pass filtered Pinecone results, match info for no-fallback / negative-constraint rules
-        const optimizedPrompt = await optimizePrompt(
+        // Step 4b: Intelligent Product Retrieval (RAG)
+        // Search Pinecone for relevant products using vector similarity
+        const retrievalResult = await performIntelligentRetrieval(
             shop,
             message,
-            conversationHistory,
-            aiSettings,
-            pineconeResults,
-            isProductQuery ? productMatchInfo : undefined
+            history
         );
+
+        // Step 4c: Build optimized prompt
+        // Get AI settings from database
+        const aiSettingsRecord = await prisma.aISettings.findUnique({
+            where: { shop }
+        });
+        const aiSettings = aiSettingsRecord?.settings as AISettingsState | null;
+
+        // Optimize prompt with context and history
+        const optimized = await optimizePrompt(
+            shop,
+            message,
+            history,
+            aiSettings,
+            retrievalResult.pineconeMatches,
+            retrievalResult.matchInfo
+        );
+
+        // Step 4d: Generate AI response
+        usageMetrics.creditsUsed = Math.ceil(optimized.tokenEstimate / 1000);
         
-        // Estimate credits needed (1 credit per ~1000 tokens)
-        const estimatedCredits = Math.max(1, Math.ceil(optimizedPrompt.tokenEstimate / 1000));
-        usageMetrics.creditsUsed = estimatedCredits;
+        const aiResponse = await generateAIResponse(
+            optimized.messagesForAI || [],
+            optimized.systemPrompt,
+            optimized.productContext
+        );
 
-        // Generate AI response
-        let aiResponse: string;
-        let aiError: string | null = null;
-        let tokensUsed = 0;
-
-        try {
-            // Use optimized prompt structure
-            const messages = [{
-                role: "user" as const,
-                content: optimizedPrompt.userPrompt
-            }];
-            
-            aiResponse = await generateAIResponse(
-                messages,
-                optimizedPrompt.systemPrompt,
-                optimizedPrompt.productContext
-            );
-            
-            // Estimate actual tokens used
-            tokensUsed = estimateTokens(optimizedPrompt.systemPrompt, message, aiResponse);
-            usageMetrics.tokensUsed = tokensUsed;
-            usageMetrics.wasSuccessful = true;
-            
-            console.log(`[OPTIMIZED] AI response: ${aiResponse.length} chars, ~${tokensUsed} tokens, ${estimatedCredits} credits`);
-            
-        } catch (error) {
-            console.error("[OPTIMIZED] AI Error:", error);
-            
-            if (error instanceof Error && error.message === "QUOTA_EXCEEDED") {
-                aiError = "QUOTA_EXCEEDED";
-                aiResponse = "Our AI service has reached its quota. A team member will assist you shortly!";
-                usageMetrics.requestType = "MANUAL_HANDOFF";
-                usageMetrics.creditsUsed = 0;
-            } else if (error instanceof Error && error.message.includes("Max retries exceeded")) {
-                aiError = "RATE_LIMITED";
-                aiResponse = "I'm experiencing high demand. Please try again in a moment!";
-                usageMetrics.creditsUsed = 0.5; // Partial credit for attempt
-            } else {
-                aiError = "AI_SERVICE_ERROR";
-                aiResponse = "I'm having technical difficulties. A team member will help you!";
-                usageMetrics.creditsUsed = 0.5;
-            }
-            
-            usageMetrics.wasSuccessful = false;
-            usageMetrics.errorMessage = error instanceof Error ? error.message : "Unknown error";
-        }
-
-        // Save AI response
-        const assistantMessage = await prisma.message.create({
+        // Step 4e: Save AI response to database
+        await prisma.message.create({
             data: {
                 sessionId: chatSession.id,
-                role: aiError ? "system" : "assistant",
+                role: "assistant",
                 content: aiResponse
             }
         });
 
-        // Record usage metrics
+        // Step 4f: Record usage metrics
+        usageMetrics.tokensUsed = estimateTokens(
+            optimized.systemPrompt,
+            message,
+            aiResponse
+        );
+        usageMetrics.wasSuccessful = true;
         usageMetrics.responseTime = Date.now() - startTime;
-        await recordUsage(shop, usageMetrics, chatSession.id, customerId ?? undefined, message);
+        
+        await recordUsage(
+            shop,
+            usageMetrics,
+            chatSession.id,
+            chatSession.customerId || undefined,
+            message
+        );
 
-        // Get updated credit status
-        const finalCreditCheck = await checkCreditsAvailable(shop);
-
-        return json({
-            success: !aiError,
+        // Step 4g: Return success response
+        return createJsonResponse({
+            success: true,
             sessionId: chatSession.id,
-            responseType: aiError ? "ERROR" : "AI",
-            userMessage: formatMessage(userMessage),
-            assistantMessage: formatMessage(assistantMessage),
-            products: productData, // Include product data for product-related queries
-            remainingCredits: finalCreditCheck.remainingCredits,
-            tokensUsed,
-            creditsUsed: usageMetrics.creditsUsed,
+            responseType: "AI",
+            userMessage: { role: "user", content: message },
+            assistantMessage: { role: "assistant", content: aiResponse },
+            products: retrievalResult.productData,
+            remainingCredits: creditCheck.remainingCredits - usageMetrics.creditsUsed,
             performance: {
                 responseTime: usageMetrics.responseTime,
-                tokenEstimate: optimizedPrompt.tokenEstimate,
-                productsFound: productData.length,
-                isProductQuery
-            },
-            error: aiError || undefined,
-            errorMessage: aiError === "QUOTA_EXCEEDED" 
-                ? "AI quota exceeded. Manual support activated."
-                : aiError === "RATE_LIMITED"
-                ? "High demand. Please try again shortly."
-                : aiError ? "AI temporarily unavailable."
-                : undefined
-        });
+                productsFound: retrievalResult.productData.length
+            }
+        } as ChatResponse);
 
-    } catch (error) {
-        console.error("[OPTIMIZED] System error:", error);
+    } catch (error: unknown) {
+        // Handle errors gracefully
+        console.error("[ACTION] Critical error:", error);
         
-        // Record system error
-        usageMetrics.wasSuccessful = false;
-        usageMetrics.errorMessage = error instanceof Error ? error.message : "System error";
-        usageMetrics.responseTime = Date.now() - startTime;
-        
-        if (params.shop) {
-            await recordUsage(params.shop, usageMetrics);
-        }
-        
-        return json({
+        return createJsonResponse({
             success: false,
             error: "SYSTEM_ERROR",
-            errorMessage: "System error. Please try again."
-        }, { status: 500 });
+            errorMessage: "An unexpected error occurred. Please try again."
+        }, 500);
     }
 };
 
 // ============================================================================
-// HELPER FUNCTIONS
+// HELPER FUNCTIONS - Step by Step
 // ============================================================================
 
-const findCustomerId = async (custMail?: string): Promise<string | null> => {
-    if (!custMail || custMail.trim() === "" || custMail === "guest") {
-        return null;
+/**
+ * Performs intelligent product retrieval using Hybrid Search (Vector + Keyword Boosting)
+ */
+async function performIntelligentRetrieval(
+    shop: string,
+    message: string,
+    history: Array<{ role: string; content: string }>
+): Promise<RetrievalResult> {
+    // Initialize return values
+    let productData: ProductData[] = [];
+    let pineconeMatches: Array<{
+        metadata?: Record<string, unknown>;
+        score?: number;
+    }> = [];
+    let matchInfo: ProductMatchInfo = { hasRelevantResults: false };
+
+    // Step 1: Check if this is a product query at all
+    const isProductQuery = checkIfProductQuery(message);
+    if (!isProductQuery) {
+        return { productData, pineconeMatches, matchInfo };
     }
-    
-    const customer = await prisma.customer.findUnique({
-        where: { email: custMail }
+
+    // 1. Setup Keyword Extraction
+    // Remove stop words to find the "core" search terms (e.g., "leather", "jacket", "gold")
+    const stopWords = new Set([
+        "show",
+        "me",
+        "the",
+        "a",
+        "an",
+        "that",
+        "this",
+        "it",
+        "in",
+        "on",
+        "for",
+        "do",
+        "you",
+        "have",
+        "please",
+        "i",
+        "need",
+        "want"
+    ]);
+    const rawWords = message.toLowerCase().split(/[^a-z0-9]+/i);
+    const searchKeywords = rawWords.filter(
+        w => w.length > 2 && !stopWords.has(w)
+    );
+
+    // Check if it's a refinement ("that one", "in red") with ONLY pronouns/adjectives
+    const isRefinement =
+        /\b(it|that|this|them|those|one|ones)\b/i.test(message) &&
+        searchKeywords.length === 0;
+
+    // 2. Logic: If it's PURELY a pronoun refinement ("How much is it?"), skip new search.
+    // The AI will rely on conversation history instead of a fresh Pinecone query.
+    if (isRefinement) {
+        return { productData: [], pineconeMatches: [], matchInfo };
+    }
+
+    // 3. Build Search Query
+    // If we found keywords (e.g. "Leather Jacket"), use those. If not, use full message.
+    const lastUserMsg =
+        history.filter(m => m.role === "user").slice(-2)[0]?.content || "";
+    let searchQuery = message;
+
+    if (searchKeywords.length > 0) {
+        searchQuery = searchKeywords.join(" "); // Focused search
+    } else if (message.length < 15) {
+        searchQuery = `${message} ${lastUserMsg}`; // Contextual fallback for short queries
+    }
+
+    // 4. Query Pinecone (Increase depth to 40)
+    // We fetch a large pool to ensure we don't miss items that have low vector scores but high keyword relevance
+    pineconeMatches = await queryPinecone(shop, searchQuery, 40);
+
+    // 5. HYBRID RE-RANKING (Vector + Keyword Boost)
+    const boostedMatches = pineconeMatches
+        .filter(m => m.metadata?.type === "PRODUCT")
+        .map(match => {
+            let boost = 0;
+            let hasKeywordMatch = false;
+
+            const title = ((match.metadata?.title as string) || "").toLowerCase();
+            const tags = Array.isArray(match.metadata?.tags)
+                ? (match.metadata!.tags as string[]).join(" ").toLowerCase()
+                : "";
+            const type = (
+                (match.metadata?.productType as string) || ""
+            ).toLowerCase();
+
+            searchKeywords.forEach(keyword => {
+                // Singularize (simple check)
+                const singular = keyword.endsWith("s")
+                    ? keyword.slice(0, -1)
+                    : keyword;
+
+                // Boost Logic
+                if (title.includes(keyword) || title.includes(singular)) {
+                    // Massive boost for Title match
+                    boost += 0.25;
+                    hasKeywordMatch = true;
+                } else if (
+                    tags.includes(keyword) ||
+                    (singular && tags.includes(singular))
+                ) {
+                    // Big boost for Tag match
+                    boost += 0.15;
+                    hasKeywordMatch = true;
+                } else if (type.includes(keyword)) {
+                    // Medium boost for Type match
+                    boost += 0.1;
+                }
+            });
+
+            return {
+                ...match,
+                originalScore: match.score || 0,
+                score: (match.score || 0) + boost, // Artificially inflated score
+                hasKeywordMatch
+            } as typeof match & {
+                originalScore: number;
+                score: number;
+                hasKeywordMatch: boolean;
+            };
+        })
+        .sort((a, b) => b.score - a.score); // Sort by new boosted score
+
+    // 6. Filtering Strategy (Trust Keywords)
+    let validMatches = boostedMatches.filter(p => {
+        // Acceptance Criteria:
+        // 1. Very high vector match (Semantic match, e.g. "Coat" matching "Jacket") -> Score > 0.60
+        // 2. Decent vector match WITH Keyword (Hybrid match) -> Score > 0.40
+
+        if (p.score >= 0.6) return true; // High confidence vector or boosted
+        if (p.hasKeywordMatch && p.score >= 0.4) return true; // Trust the keyword match
+
+        return false;
     });
-    
-    return customer?.id || null;
-};
 
-const getOrCreateSession = async (shop: string, custMail?: string, sessionId?: string) => {
-    const isGuest = !custMail || custMail.trim() === "" || custMail === "guest";
+    // 7. Strict Fallback (Anti-Hallucination)
+    // If strict filtering returned nothing, do we show anything?
+    if (validMatches.length === 0) {
+        // Only show loose matches if they DEFINITELY have a keyword match.
+        // Never show random items based on low vector scores alone.
+        validMatches = boostedMatches
+            .filter(p => p.hasKeywordMatch && p.originalScore > 0.25)
+            .slice(0, 3);
+    }
+
+    // Limit to top 6
+    validMatches = validMatches.slice(0, 6);
+
+    // 8. Map to Output
+    productData = validMatches.map(m => ({
+        id: m.metadata?.product_id as string,
+        title: m.metadata?.title as string,
+        price: Number(m.metadata?.price) || 0,
+        handle: m.metadata?.handle as string,
+        image: m.metadata?.image as string,
+        score: m.score
+    }));
+
+    matchInfo = {
+        hasRelevantResults: productData.length > 0,
+        topScore: productData[0]?.score
+    };
+
+    return { productData, pineconeMatches, matchInfo };
+}
+
+/**
+ * Handles keyword-based responses (greetings, policies, etc.)
+ */
+async function handleKeywordResponse(
+    shop: string,
+    customerEmail: string | undefined,
+    sessionId: string | undefined,
+    message: string,
+    keywordRes: KeywordResponse,
+    creditCheck: CreditCheckResult,
+    startTime: number
+): Promise<Response> {
+    // Step 1: Save messages to database
+    const { userMessage, assistantMessage, chatSession } = 
+        await saveUserAndBotMessage(
+            shop,
+            customerEmail,
+            sessionId,
+            message,
+            keywordRes.response!,
+            false
+        );
+
+    // Step 2: Record usage metrics
+    const usage: UsageMetrics = {
+        requestType: "KEYWORD_RESPONSE",
+        creditsUsed: keywordRes.creditsUsed,
+        wasSuccessful: true,
+        responseTime: Date.now() - startTime
+    };
     
-    // Find or create customer if email is provided
+    await recordUsage(
+        shop,
+        usage,
+        chatSession.id,
+        chatSession.customerId || undefined,
+        message
+    );
+
+    // Step 3: Return response
+    return createJsonResponse({
+        success: true,
+        sessionId: chatSession.id,
+        responseType: "KEYWORD",
+        userMessage: formatMessage(userMessage),
+        assistantMessage: formatMessage(assistantMessage),
+        products: keywordRes.productData || [],
+        remainingCredits: creditCheck.remainingCredits - usage.creditsUsed,
+        performance: {
+            responseTime: usage.responseTime || 0,
+            productsFound: keywordRes.productData?.length || 0
+        }
+    } as ChatResponse);
+}
+
+/**
+ * Handles credit exhaustion scenario
+ */
+async function handleCreditExhausted(
+    shop: string,
+    customerEmail: string | undefined,
+    sessionId: string | undefined,
+    message: string,
+    creditCheck: CreditCheckResult,
+    startTime: number
+): Promise<Response> {
+    // Step 1: Create handoff message
+    const handoffMsg = "I'm currently unavailable. Please contact support.";
+
+    // Step 2: Save messages to database
+    const { userMessage, assistantMessage, chatSession } = 
+        await saveUserAndBotMessage(
+            shop,
+            customerEmail,
+            sessionId,
+            message,
+            handoffMsg,
+            true
+        );
+
+    // Step 3: Record usage (no credits used, but track the attempt)
+    const usage: UsageMetrics = {
+        requestType: "MANUAL_HANDOFF",
+        creditsUsed: 0,
+        wasSuccessful: false,
+        responseTime: Date.now() - startTime
+    };
+    
+    await recordUsage(
+        shop,
+        usage,
+        chatSession.id,
+        chatSession.customerId || undefined,
+        message
+    );
+
+    // Step 4: Return handoff response
+    return createJsonResponse({
+        success: false,
+        handoffToManual: true,
+        sessionId: chatSession.id,
+        responseType: "MANUAL_HANDOFF",
+        userMessage: formatMessage(userMessage),
+        assistantMessage: formatMessage(assistantMessage),
+        remainingCredits: creditCheck.remainingCredits,
+        error: "CREDITS_EXHAUSTED"
+    } as ChatResponse);
+}
+
+/**
+ * Checks if message is a product-related query
+ */
+function checkIfProductQuery(message: string): boolean {
+    const lowerMessage = message.toLowerCase().trim();
+
+    // High confidence product keywords
+    const productKeywords = [
+        'show me', 'looking for', 'need a', 'want to buy', 'shopping for',
+        'find', 'search for', 'do you have', 'do you sell', 'available',
+        'tell me about', 'tell me any', 'which', 'what products',
+        'show products', 'browse', 'catalog', 'inventory', 'items',
+        'what do you have', 'what can i buy', 'what items', 'see products',
+        'product', 'products', 'item', 'items', 'merchandise'
+    ];
+
+    // Price-related keywords (often product queries)
+    const priceKeywords = [
+        'cheap', 'cheapest', 'expensive', 'price', 'cost', 'budget',
+        'under', 'below', 'above', 'over', 'affordable', 'lowest', 'highest'
+    ];
+
+    // Category keywords
+    const categoryKeywords = [
+        'clothing', 'clothes', 'apparel', 'fashion', 'shirt', 'dress', 'shoes',
+        'electronics', 'phone', 'laptop', 'computer', 'tablet',
+        'furniture', 'home', 'kitchen', 'bedroom', 'sofa', 'chair',
+        'beauty', 'skincare', 'makeup', 'cosmetics', 'jewelry', 'jewellery',
+        'sport', 'outdoor', 'fitness', 'gym', 'sneakers', 'boots', 'jacket'
+    ];
+
+    // Check for product keywords
+    if (productKeywords.some(k => lowerMessage.includes(k))) {
+        return true;
+    }
+
+    // Check for price keywords
+    if (priceKeywords.some(k => lowerMessage.includes(k))) {
+        return true;
+    }
+
+    // Check for category keywords
+    if (categoryKeywords.some(k => lowerMessage.includes(k))) {
+        return true;
+    }
+
+    return false;
+}
+
+/**
+ * Gets or creates a chat session
+ */
+async function getOrCreateSession(
+    shop: string,
+    customerEmail?: string,
+    sessionId?: string
+) {
+    // Step 1: Determine if guest user
+    const isGuest = !customerEmail;
     let customerId: string | null = null;
-    if (!isGuest && custMail) {
+
+    // Step 2: Create or find customer if email provided
+    if (customerEmail) {
         const customer = await prisma.customer.upsert({
-            where: { email: custMail },
-            create: { email: custMail, source: "WEBSITE" },
+            where: { email: customerEmail },
+            create: { email: customerEmail, source: "WEBSITE" },
             update: {}
         });
         customerId = customer.id;
     }
 
-    // Get or create chat session
-    let chatSession;
+    // Step 3: Try to find existing session
+    let session = null;
+    
     if (sessionId) {
-        chatSession = await prisma.chatSession.findUnique({
+        session = await prisma.chatSession.findUnique({
             where: { id: sessionId },
             include: { messages: { orderBy: { createdAt: "asc" } } }
         });
 
-        if (chatSession && chatSession.shop !== shop) {
-            throw new Error("Session does not belong to this shop");
+        // Security: Verify session belongs to this shop
+        if (session && session.shop !== shop) {
+            session = null; // Invalid session
         }
     }
 
-    if (!chatSession || (customerId && chatSession.customerId !== customerId)) {
-        chatSession = await prisma.chatSession.create({
+    // Step 4: Create new session if not found
+    if (!session) {
+        session = await prisma.chatSession.create({
             data: { shop, customerId, isGuest },
             include: { messages: true }
         });
     }
 
-    return chatSession;
-};
+    return session;
+}
 
-const saveUserAndBotMessage = async (
+/**
+ * Saves user and bot messages to database
+ */
+async function saveUserAndBotMessage(
     shop: string,
-    custMail: string | undefined,
+    customerEmail: string | undefined,
     sessionId: string | undefined,
-    userMessage: string,
-    botResponse: string,
-    isHandoff: boolean
-) => {
-    const chatSession = await getOrCreateSession(shop, custMail, sessionId);
-    
-    const userMsg = await prisma.message.create({
+    userMsg: string,
+    botMsg: string,
+    isSystem: boolean
+) {
+    // Step 1: Get or create session
+    const session = await getOrCreateSession(shop, customerEmail, sessionId);
+
+    // Step 2: Save user message
+    const userMessage = await prisma.message.create({
         data: {
-            sessionId: chatSession.id,
+            sessionId: session.id,
             role: "user",
-            content: userMessage
+            content: userMsg
         }
     });
 
-    const botMsg = await prisma.message.create({
+    // Step 3: Save bot message
+    const assistantMessage = await prisma.message.create({
         data: {
-            sessionId: chatSession.id,
-            role: isHandoff ? "system" : "assistant",
-            content: botResponse
+            sessionId: session.id,
+            role: isSystem ? "system" : "assistant",
+            content: botMsg
         }
     });
 
+    return { userMessage, assistantMessage, chatSession: session };
+}
+
+/**
+ * Formats message for API response
+ */
+function formatMessage(m: {
+    id: string;
+    role: string;
+    content: string;
+    createdAt: string | Date;
+}): MessageFormat {
     return {
-        userMessage: userMsg,
-        assistantMessage: botMsg,
-        chatSession
+        id: m.id,
+        role: m.role as "user" | "assistant" | "system",
+        content: m.content,
+        createdAt: typeof m.createdAt === "string" 
+            ? m.createdAt 
+            : m.createdAt.toISOString()
     };
-};
+}
 
-const formatMessage = (message: { id: string; role: string; content: string; createdAt: Date }) => ({
-    id: message.id,
-    role: message.role,
-    content: message.content,
-    createdAt: message.createdAt
-});
-
-const estimateTokens = (systemPrompt: string, userMessage: string, response: string): number => {
-    const totalText = systemPrompt + userMessage + response;
-    const wordCount = totalText.split(/\s+/).length;
-    return Math.ceil(wordCount / 0.75); // 1 token ≈ 0.75 words
-};
-
-const checkIfProductQuery = (message: string): boolean => {
-    const lowerMessage = message.toLowerCase().trim();
-    
-    const productKeywords = [
-        // Direct product questions
-        'what products', 'show products', 'your products', 'products do you have',
-        'what do you sell', 'what can i buy', 'items do you have', 'tell me about',
-        
-        // Category/browsing queries
-        'show me', 'looking for', 'need a', 'want to buy', 'shopping for',
-        'browse', 'catalog', 'collection', 'category', 'any', 'tell me any',
-        
-        // Price-related (already handled by keyword system, but might need products)
-        'price', 'cost', 'how much', 'expensive', 'cheap', 'affordable',
-        
-        // Product search
-        'find', 'search', 'available', 'in stock', 'do you have',
-        
-        // Clothing & Fashion
-        'clothing', 'clothes', 'apparel', 'fashion', 'wear', 'shirt', 'dress', 
-        'shoes', 'jacket', 'pants', 'jeans', 'skirt', 'blouse', 'sweater',
-        'hoodie', 'shorts', 'suit', 'coat', 'vest', 'underwear', 'socks',
-        'hat', 'cap', 'scarf', 'gloves', 'belt', 'tie', 'swimwear', 'lingerie',
-        
-        // Electronics & Tech
-        'electronics', 'phone', 'computer', 'laptop', 'tablet', 'headphones',
-        'camera', 'watch', 'speaker', 'charger', 'cable', 'mouse', 'keyboard',
-        
-        // Home & Living
-        'home', 'furniture', 'decor', 'kitchen', 'bedroom', 'bathroom',
-        'living room', 'dining', 'bed', 'chair', 'table', 'sofa', 'lamp',
-        'pillow', 'blanket', 'curtains', 'rug', 'mirror', 'clock', 'vase',
-        
-        // Beauty & Health
-        'beauty', 'skincare', 'makeup', 'cosmetics', 'health', 'fitness',
-        'perfume', 'shampoo', 'lotion', 'cream', 'serum', 'lipstick',
-        'foundation', 'mascara', 'nail', 'hair', 'body', 'face',
-        
-        // Sports & Outdoor
-        'sport', 'outdoor', 'exercise', 'gym', 'running', 'yoga', 'bike',
-        'ball', 'equipment', 'gear', 'outdoor', 'camping', 'hiking',
-        
-        // Other categories
-        'book', 'toy', 'game', 'jewelry', 'accessories', 'bag', 'wallet',
-        'sunglasses', 'phone case', 'backpack', 'purse', 'necklace', 'ring',
-        'bracelet', 'earring'
-    ];
-    
-    // Check if message contains product-related keywords
-    return productKeywords.some(keyword => lowerMessage.includes(keyword)) ||
-           // Questions that typically expect product listings
-           (lowerMessage.includes('?') && (
-               lowerMessage.includes('have') || 
-               lowerMessage.includes('sell') || 
-               lowerMessage.includes('offer') ||
-               lowerMessage.includes('available') ||
-               lowerMessage.includes('recommend') ||
-               lowerMessage.includes('suggest')
-           )) ||
-           // Pattern: "tell me [something] that is [category]"
-           (lowerMessage.includes('tell me') && lowerMessage.includes('that is'));
-};
+/**
+ * Estimates token count (rough calculation)
+ */
+function estimateTokens(sys: string, user: string, res: string): number {
+    const text = sys + user + res;
+    return Math.ceil(text.split(/\s+/).length / 0.75);
+}

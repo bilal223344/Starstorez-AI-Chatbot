@@ -1,12 +1,44 @@
-import { queryPinecone } from "./openaiService";
+/* app/services/optimizedChatService.ts */
+/**
+ * ============================================================================
+ * OPTIMIZED CHAT SERVICE
+ * ============================================================================
+ * 
+ * This service handles keyword detection, intent routing, and prompt optimization
+ * for the chatbot. It provides fast keyword responses and smart AI routing.
+ * 
+ * Main Functions:
+ * 1. checkKeywordResponse() - Routes queries to keyword handlers or AI
+ * 2. optimizePrompt() - Builds optimized prompts for AI processing
+ * 
+ * ============================================================================
+ */
+
 import prisma from "app/db.server";
+import { classifyIntent, normalizeTypo } from "./intentClassifier";
+
+// ============================================================================
+// TYPES & INTERFACES
+// ============================================================================
 
 export interface KeywordResponse {
     isKeywordMatch: boolean;
     response?: string;
-    productData?: any[];
+    productData?: Array<{
+        id?: string;
+        title?: string;
+        price?: number;
+        handle?: string;
+        image?: string;
+        description?: string;
+    }>;
     bypassAI?: boolean;
     creditsUsed: number;
+}
+
+export interface ProductMatchInfo {
+    hasRelevantResults: boolean;
+    topScore?: number;
 }
 
 export interface OptimizedPrompt {
@@ -14,284 +46,503 @@ export interface OptimizedPrompt {
     userPrompt: string;
     productContext?: string;
     tokenEstimate: number;
+    fullConversationHistory?: Array<{ role: string; content: string }>;
+    messagesForAI?: Array<{ role: "user" | "assistant"; content: string }>;
 }
 
 // ============================================================================
-// KEYWORD-BASED DIRECT RESPONSES
+// KEYWORD ROUTER (The "Smart Guardrail")
 // ============================================================================
 
-export const checkKeywordResponse = async (shop: string, userMessage: string): Promise<KeywordResponse> => {
-    const message = userMessage.toLowerCase().trim();
-    
-    // Price-related queries
-    if (isPriceQuery(message)) {
-        return await handlePriceQuery(shop, message);
-    }
-    
-    // Best sellers / popular products
-    if (isBestSellerQuery(message)) {
-        return await handleBestSellerQuery(shop, message);
-    }
-    
-    // New arrivals / latest products
-    if (isNewArrivalsQuery(message)) {
-        return await handleNewArrivalsQuery(shop, message);
-    }
-    
-    // Category/collection queries
-    if (isCategoryQuery(message)) {
-        return await handleCategoryQuery(shop, message);
-    }
-    
-    // Simple greetings
-    if (isGreeting(message)) {
-        return handleGreeting();
+/**
+ * Main router function that checks if a query can be handled by keyword responses
+ * or needs AI processing.
+ * 
+ * Flow:
+ * 1. Normalize input (fix typos)
+ * 2. Check for pronouns (force AI if found)
+ * 3. Classify intent
+ * 4. Route to appropriate handler
+ */
+export const checkKeywordResponse = async (
+    shop: string,
+    userMessage: string
+): Promise<KeywordResponse> => {
+    // Step 1: Normalize message (fix common typos)
+    const normalizedMessage = normalizeTypo(userMessage);
+
+    // Step 2: Pronoun Guard - If user refers to "it/that", FORCE AI to use context.
+    // Keyword search is stateless and fails here.
+    if (/\b(it|that|them|those|this|one|ones)\b/i.test(normalizedMessage)) {
+        return { isKeywordMatch: false, creditsUsed: 0 };
     }
 
-    // Policy queries (check before order status to avoid conflicts)
-    if (isPolicyQuery(message)) {
-        return await handlePolicyQuery(shop, message);
-    }
+    // Step 3: Classify user intent
+    const classification = classifyIntent(normalizedMessage);
 
-    // CHATBOT-TESTING FIX: Order EDIT (add to order, modify) — distinct from Order STATUS (tracking)
-    if (isOrderEditQuery(message)) {
-        return handleOrderEditQuery();
-    }
+    // Step 4: Route based on intent
+    switch (classification.intent) {
+        case "COMPLIMENT":
+            return handleCompliment();
 
-    // Order status / tracking queries
-    if (isOrderStatusQuery(message)) {
-        return handleOrderStatusQuery();
-    }
+        case "GREETING":
+            return handleGreeting();
 
-    // General product queries
-    if (isGeneralProductQuery(message)) {
-        return await handleGeneralProductQuery(shop, message);
-    }
+        case "POLICY_QUERY":
+            // CRITICAL: Policies NEVER return products. Fixes "Furniture Fallback".
+            return await handlePolicyQuery(
+                shop,
+                normalizedMessage,
+                classification.extractedInfo?.policyType
+            );
 
-    // Store information queries
-    if (isStoreInfoQuery(message)) {
-        return await handleStoreInfoQuery(shop, message);
-    }
+        case "ORDER_STATUS":
+            return await handleOrderStatusQuery(shop);
 
-    return { isKeywordMatch: false, creditsUsed: 0 };
+        case "ADD_TO_CART":
+            return handleAddToCartQuery();
+
+        case "PRODUCT_QUERY":
+            // FIX 1: "Cheap Items" Bug - Generic Nouns Detection
+            // Handles "Generic Noun" Bug: "items", "products", "stuff" are NOT categories
+            // When user says "Show me cheap items", we should use DB sort, not AI search
+            if (isPriceQuery(normalizedMessage)) {
+                // Step 1: Define generic nouns that are NOT specific product categories
+                const genericNouns = [
+                    'item', 'items', 'product', 'products', 'stuff', 
+                    'thing', 'things', 'goods', 'inventory'
+                ];
+                const words = normalizedMessage.split(/\s+/).filter(w => w.length > 0);
+                const hasGenericNoun = words.some(w => genericNouns.includes(w.toLowerCase()));
+                
+                // Step 2: Check if message contains a specific product category from this store
+                const hasSpecificCategory = await containsProductCategory(shop, normalizedMessage);
+                
+                // Step 3: Routing decision
+                // - If message has a SPECIFIC category (e.g., "jewelry", "tires") AND NOT a generic noun -> Use AI
+                //   Example: "Cheap jewelry" -> AI (jewelry is a real category)
+                // - If message has ONLY generic nouns (e.g., "items", "stuff") -> Use Keyword Handler (DB Sort)
+                //   Example: "Cheap items" -> Keyword Handler (items is generic, not a category)
+                // - If message has neither -> Use Keyword Handler (simple price sort)
+                if (hasSpecificCategory && !hasGenericNoun) {
+                    return { isKeywordMatch: false, creditsUsed: 0 }; // Go to AI for category-specific search
+                }
+                
+                // Use DB Sort for generic queries (works for ANY merchant's inventory)
+                return await handlePriceQuery(shop, normalizedMessage);
+            }
+
+            // Best Sellers & New Arrivals are usually safe for Keywords
+            if (isBestSellerQuery(normalizedMessage)) {
+                return await handleBestSellerQuery(shop);
+            }
+            if (isNewArrivalsQuery(normalizedMessage)) {
+                return await handleNewArrivalsQuery(shop);
+            }
+
+            // Default: Let AI handle specific product lookups
+            return { isKeywordMatch: false, creditsUsed: 0 };
+
+        default:
+            return { isKeywordMatch: false, creditsUsed: 0 };
+    }
 };
 
 // ============================================================================
-// PROMPT OPTIMIZATION
+// PROMPT BUILDER (The "Chameleon")
 // ============================================================================
 
-export interface ProductMatchInfo {
-    hasRelevantResults: boolean;
-    topScore?: number;
-}
-
+/**
+ * Builds optimized prompt for AI processing with context and history.
+ * 
+ * Steps:
+ * 1. Build dynamic system prompt (reads DB to define store persona)
+ * 2. Build product context (only if relevant)
+ * 3. Format conversation history for API
+ * 4. Estimate token usage
+ */
 export const optimizePrompt = async (
     shop: string,
     userMessage: string,
     conversationHistory: Array<{ role: string; content: string }>,
-    aiSettings?: any,
-    existingPineconeResults?: any[],
-    productMatchInfo?: ProductMatchInfo
+    aiSettings: {
+        responseTone?: { selectedTone?: string[] };
+        policies?: { shipping?: string };
+    } | null,
+    pineconeMatches: Array<{
+        metadata?: Record<string, unknown>;
+        score?: number;
+    }>,
+    matchInfo?: ProductMatchInfo
 ): Promise<OptimizedPrompt> => {
-    
-    // Build system prompt with CHATBOT-TESTING fixes (no fallback, negative constraints, exact policies)
-    const systemPrompt = buildOptimizedSystemPrompt(aiSettings, productMatchInfo, userMessage);
-    
-    // Get relevant product context (use existing filtered results if available)
+    // Step 1: Build Dynamic System Prompt (Reads DB to define Store Persona)
+    const systemPrompt = await buildChameleonSystemPrompt(
+        shop,
+        aiSettings,
+        matchInfo
+    );
+
+    // Step 2: Build Product Context (Only if relevant)
     let productContext: string | undefined;
-    if (existingPineconeResults && existingPineconeResults.length > 0) {
-        productContext = buildProductContextFromResults(existingPineconeResults);
-    } else {
-        productContext = await getRelevantProductContext(shop, userMessage);
+    const isRefinement = /\b(it|that|them|one|red|blue|cheaper|smaller|larger)\b/i.test(
+        userMessage
+    );
+
+    // If matches found, use them
+    if (matchInfo?.hasRelevantResults && pineconeMatches.length > 0) {
+        productContext = pineconeMatches
+            .filter(m => m.metadata?.type === "PRODUCT")
+            .map(m => `${m.metadata?.title}: $${m.metadata?.price}`)
+            .join("\n");
     }
-    
-    // Limit conversation history to recent messages only
-    const recentHistory = conversationHistory.slice(-6); // Last 3 exchanges
-    
-    // Estimate tokens (rough calculation: 1 token ≈ 0.75 words)
-    const tokenEstimate = estimateTokens(systemPrompt + userMessage + (productContext || '') + 
-                                        recentHistory.map(m => m.content).join(' '));
-    
+    // If NO matches, but it IS a refinement, leave context undefined so AI uses History
+    else if (matchInfo && !matchInfo.hasRelevantResults && isRefinement) {
+        productContext = undefined; // AI relies on Memory
+    }
+    // If NO matches and NO refinement, clear context (Avoid "Clay Pot" for "Sneaker" fallback)
+    else {
+        productContext = undefined;
+    }
+
+    // Step 3: Format History for API
+    const messagesForAI = conversationHistory
+        .filter(msg => msg.role !== "system")
+        .map(msg => ({
+            role: msg.role as "user" | "assistant",
+            content: msg.content
+        }));
+
+    // Step 4: Estimate tokens
+    const textBlock =
+        systemPrompt +
+        userMessage +
+        (productContext || "") +
+        messagesForAI.map(m => m.content).join("");
+    const tokenEstimate = Math.ceil(textBlock.split(/\s+/).length / 0.75);
+
     return {
         systemPrompt,
         userPrompt: userMessage,
         productContext,
-        tokenEstimate
+        tokenEstimate,
+        messagesForAI,
+        fullConversationHistory: conversationHistory
     };
 };
 
 // ============================================================================
-// KEYWORD DETECTION FUNCTIONS
+// HELPER FUNCTIONS - Step by Step
 // ============================================================================
 
+/**
+ * Builds dynamic system prompt that adapts to store's actual product categories.
+ * This prevents hallucinations (e.g., selling laptops in a shoe store).
+ */
+async function buildChameleonSystemPrompt(
+    shop: string,
+    aiSettings: {
+        responseTone?: { selectedTone?: string[] };
+        policies?: { shipping?: string };
+    } | null,
+    matchInfo?: ProductMatchInfo
+): Promise<string> {
+    // Step 1: Fetch actual categories from tags/collections to prevent hallucinations
+    let topCategories: string[] = [];
+    try {
+        const products = await prisma.product.findMany({
+            where: { shop },
+            select: { tags: true, collection: true },
+            take: 200
+        });
+
+        // Step 2: Count category frequency from tags and collections
+        const categoryCount = new Map<string, number>();
+        products.forEach(p => {
+            if (p.tags && Array.isArray(p.tags)) {
+                p.tags.forEach((tag: string) => {
+                    if (tag && tag.length > 2) {
+                        const lower = tag.toLowerCase();
+                        categoryCount.set(lower, (categoryCount.get(lower) || 0) + 1);
+                    }
+                });
+            }
+            if (p.collection && Array.isArray(p.collection)) {
+                p.collection.forEach((col: string) => {
+                    if (col && col.length > 2) {
+                        const lower = col.toLowerCase();
+                        categoryCount.set(lower, (categoryCount.get(lower) || 0) + 1);
+                    }
+                });
+            }
+        });
+
+        // Step 3: Get top 5 most common categories
+        topCategories = Array.from(categoryCount.entries())
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 5)
+            .map(([cat]) => cat)
+            // FIX: Filter out internal/admin-only labels like "Automated Collection"
+            // These are Shopify admin terms and should never be shown to customers.
+            .filter(
+                c =>
+                    !c.toLowerCase().includes("automated") &&
+                    !c.toLowerCase().includes("collection")
+            );
+    } catch (error) {
+        console.error("[PROMPT] Error fetching categories:", error);
+    }
+
+    // Step 4: Build category list
+    const catList =
+        topCategories.length > 0
+            ? topCategories.join(", ")
+            : "General Merchandise";
+
+    // Step 5: Build base prompt
+    let prompt = `You are a helpful store assistant. Be friendly, concise, and answer only what's asked.\n`;
+    prompt += `Store specializes in: [${catList}].\n\n`;
+
+    // EXPLICIT CONTEXT & MEMORY INSTRUCTIONS
+    // This tells the AI: "If I didn't give you products, look at what we just talked about."
+    prompt += `CONTEXT RULES:\n`;
+    prompt += `- I will provide a 'PRODUCT CONTEXT' block. If it is populated, you MUST treat those as real products from our store and prioritize them in your answer.\n`;
+    prompt += `- If 'PRODUCT CONTEXT' is empty (or missing), you MUST refer to the 'CONVERSATION HISTORY'.\n`;
+    prompt += `- If the user says "it", "that", or "them", identify the product from the last message in history.\n`;
+    prompt += `- Combine filters across turns (e.g., "Summer" + "Under $20" = Summer items <$20).\n\n`;
+
+    // THE MAGIC FIX FOR "WE DON'T SELL THAT"
+    prompt += `CRITICAL INVENTORY RULES:\n`;
+    // 1. PRIORITY OVERRIDE: product context always wins over category assumptions
+    prompt += `1. PRIORITY OVERRIDE: If the 'PRODUCT CONTEXT' block below contains products, you MUST assume we sell them and present them to the user. Do not filter them out based on the category list.\n`;
+    // 2. Only if no product context, use categories
+    prompt += `2. If 'PRODUCT CONTEXT' is empty, only then check if the request matches our categories: [${catList}].\n`;
+    // 3. Explicit guard for obviously unsupported verticals
+    prompt += `3. If the user asks for "Food", "Electronics", or "Services" and they are NOT in the context, say "We don't sell that".\n`;
+    prompt += `4. In all cases, do not invent products. Use only the 'PRODUCT CONTEXT' block or the real conversation history when referencing specific items.\n`;
+
+    // Step 6: Add context about search results
+    if (matchInfo && !matchInfo.hasRelevantResults) {
+        prompt += `- NOTE: No new products matched this query. If the user is refining ("blue ones"), use memory. If looking for new items, apologize.\n`;
+    }
+
+    // Step 7: Add Tone & Policies from Settings
+    const tone = aiSettings?.responseTone?.selectedTone?.[0] || "friendly";
+    prompt += `Tone: ${tone}.\n`;
+
+    // Step 8: Add policies if available (concise)
+    const policies = aiSettings?.policies || {};
+    if (policies.shipping?.trim()) {
+        prompt += `Shipping: ${policies.shipping.substring(0, 150)}.\n`;
+    }
+
+    return prompt;
+}
+
+/**
+ * Checks if the user message contains a known category from THIS store.
+ * Used to route "Cheap Jewelry" to AI instead of dumb price handler.
+ */
+async function containsProductCategory(
+    shop: string,
+    message: string
+): Promise<boolean> {
+    try {
+        // Step 1: Fetch products from this shop
+        const products = await prisma.product.findMany({
+            where: { shop },
+            select: { tags: true, collection: true, title: true },
+            take: 100
+        });
+
+        // Step 2: Build set of valid category terms
+        const validTerms = new Set<string>();
+        products.forEach(p => {
+            // Add tags as categories
+            if (p.tags && Array.isArray(p.tags)) {
+                p.tags.forEach((tag: string) => {
+                    if (tag && tag.length > 2) validTerms.add(tag.toLowerCase());
+                });
+            }
+            // Add collections as categories
+            if (p.collection && Array.isArray(p.collection)) {
+                p.collection.forEach((col: string) => {
+                    if (col && col.length > 2) validTerms.add(col.toLowerCase());
+                });
+            }
+            // Extract common words from titles (longer words are likely categories)
+            if (p.title) {
+                const titleWords = p.title.toLowerCase().split(/\s+/);
+                titleWords.forEach(word => {
+                    if (word.length > 4 && word.length < 20) validTerms.add(word);
+                });
+            }
+        });
+
+        // Step 3: Check if message contains any valid category term
+        const lowerMsg = message.toLowerCase();
+        return Array.from(validTerms).some(term => lowerMsg.includes(term));
+    } catch {
+        return false;
+    }
+}
+
+// ============================================================================
+// KEYWORD DETECTION FUNCTIONS (Return boolean)
+// ============================================================================
+
+/**
+ * Checks if message is a price-related query
+ */
 const isPriceQuery = (message: string): boolean => {
     const priceKeywords = [
-        'cheapest', 'lowest price', 'most affordable', 'budget', 'under',
-        'expensive', 'highest price', 'premium', 'luxury',
-        'price range', 'cost', 'how much'
+        "cheap",
+        "cheapest",
+        "expensive",
+        "cost",
+        "price",
+        "budget",
+        "under",
+        "below",
+        "above",
+        "over",
+        "affordable",
+        "lowest",
+        "highest"
     ];
-    return priceKeywords.some(keyword => message.includes(keyword));
+    return priceKeywords.some(keyword => message.toLowerCase().includes(keyword));
 };
 
+/**
+ * Checks if message is asking for best-selling products
+ */
 const isBestSellerQuery = (message: string): boolean => {
     const bestSellerKeywords = [
-        'best seller', 'bestseller', 'best selling', 'popular', 'top selling', 
-        'most bought', 'most sold', 'trending', 'hot', 'recommended', 
-        'most popular', 'top products', 'customer favorites', 'fan favorites',
-        'what sells most', 'most ordered', 'top picks', 'customer choice'
+        "best seller",
+        "bestseller",
+        "best selling",
+        "popular",
+        "top selling",
+        "most bought",
+        "most sold",
+        "trending",
+        "hot",
+        "recommended",
+        "most popular",
+        "top products",
+        "customer favorites",
+        "fan favorites",
+        "what sells most",
+        "most ordered",
+        "top picks",
+        "customer choice"
     ];
-    return bestSellerKeywords.some(keyword => message.includes(keyword));
+    return bestSellerKeywords.some(keyword =>
+        message.toLowerCase().includes(keyword)
+    );
 };
 
+/**
+ * Checks if message is asking for new arrivals
+ * FIX: "Fresh Fruit" bug - exclude "fresh fruit" from new arrivals
+ */
 const isNewArrivalsQuery = (message: string): boolean => {
+    if (message.includes("fresh fruit")) return false;
     const newArrivalsKeywords = [
-        'new arrival', 'new product', 'latest', 'newest', 'just arrived',
-        'recently added', 'fresh', 'what\'s new'
+        "new arrival",
+        "new product",
+        "latest",
+        "newest",
+        "just arrived",
+        "recently added",
+        "fresh",
+        "what's new"
     ];
-    return newArrivalsKeywords.some(keyword => message.includes(keyword));
-};
-
-const isCategoryQuery = (message: string): boolean => {
-    const categoryKeywords = [
-        'category', 'collection', 'type', 'kind of', 'looking for',
-        'show me', 'browse', 'section'
-    ];
-    return categoryKeywords.some(keyword => message.includes(keyword));
-};
-
-const isGreeting = (message: string): boolean => {
-    const greetings = [
-        'hi', 'hello', 'hey', 'good morning', 'good afternoon', 'good evening',
-        'howdy', 'greetings', 'what\'s up', 'sup'
-    ];
-    return greetings.some(greeting => message.startsWith(greeting)) || 
-           greetings.some(greeting => message === greeting);
-};
-
-const isPolicyQuery = (message: string): boolean => {
-    const policyKeywords = [
-        'shipping policy', 'return policy', 'refund policy', 'privacy policy',
-        'terms of service', 'terms and conditions', 'policy about', 'policies',
-        'how do you ship', 'shipping information', 'return information',
-        'refund information', 'privacy information', 'shipping rules',
-        'return rules', 'refund rules', 'terms of use', 'user agreement',
-        'tell me about shipping', 'about your shipping', 'shipping details',
-        'return process', 'how to return', 'can i return', 'return items',
-        'refund process', 'how to get refund', 'can i get refund',
-        'what is your policy', 'your policies', 'store policies', 'store policy',
-        'tell me about policy', 'about policy', 'policy information',
-        'what are your policies', 'company policies', 'business policies'
-    ];
-    return policyKeywords.some(keyword => message.includes(keyword));
-};
-
-const isOrderEditQuery = (message: string): boolean => {
-    const orderEditKeywords = [
-        'add to order', 'add to my order', 'add to existing order',
-        'modify order', 'change my order', 'edit order', 'update order',
-        'add .* to .* order', 'can i add', 'add the ', 'add the red',
-        'add the blue', 'add items to', 'add something to my order'
-    ];
-    const lower = message.toLowerCase();
-    return orderEditKeywords.some(k => {
-        if (k.includes('.*')) {
-            const re = new RegExp(k.replace(/\.\*/g, '\\S*'), 'i');
-            return re.test(lower);
-        }
-        return lower.includes(k);
-    }) && !isPolicyQuery(message);
-};
-
-const isOrderStatusQuery = (message: string): boolean => {
-    const orderKeywords = [
-        'order status', 'track order', 'where is my order',
-        'delivery status', 'tracking number', 'order number', 'shipment status',
-        'when will my order arrive', 'order tracking', 'track my package'
-    ];
-    return orderKeywords.some(keyword => message.includes(keyword)) &&
-           !isOrderEditQuery(message) && !isPolicyQuery(message);
-};
-
-const isGeneralProductQuery = (message: string): boolean => {
-    const generalProductKeywords = [
-        'what products do you have', 'what do you sell', 'show me products',
-        'what products', 'your products', 'products available', 
-        'what can i buy', 'what items', 'show catalog',
-        'browse products', 'see products'
-    ];
-    return generalProductKeywords.some(keyword => message.includes(keyword));
-};
-
-const isStoreInfoQuery = (message: string): boolean => {
-    const storeInfoKeywords = [
-        'store name', 'what is your store', 'your store name', 'name of store',
-        'who are you', 'what store', 'store called', 'business name',
-        'company name', 'shop name', 'about your store', 'tell me about your store',
-        'what store is this', 'which store', 'name of this store', 'your name',
-        'about you', 'about this store', 'your business', 'what business'
-    ];
-    return storeInfoKeywords.some(keyword => message.includes(keyword));
+    return newArrivalsKeywords.some(keyword =>
+        message.toLowerCase().includes(keyword)
+    );
 };
 
 // ============================================================================
 // KEYWORD RESPONSE HANDLERS
 // ============================================================================
 
-const handlePriceQuery = async (shop: string, message: string): Promise<KeywordResponse> => {
+/**
+ * Handles price-related queries (cheapest, most expensive, etc.)
+ */
+const handlePriceQuery = async (
+    shop: string,
+    message: string
+): Promise<KeywordResponse> => {
     try {
-        // Extract price intent (cheapest, most expensive, range)
-        let sortOrder = 'asc'; // Default to cheapest
-        if (message.includes('expensive') || message.includes('premium') || message.includes('luxury')) {
-            sortOrder = 'desc';
+        // Step 1: Determine sort order based on message
+        let sortOrder: "asc" | "desc" = "asc"; // Default to cheapest
+        if (
+            message.includes("expensive") ||
+            message.includes("premium") ||
+            message.includes("luxury")
+        ) {
+            sortOrder = "desc";
         }
 
-        // Query products from database sorted by price
+        // Step 2: Query products from database sorted by price
         const products = await prisma.product.findMany({
             where: { shop },
-            orderBy: { price: sortOrder as 'asc' | 'desc' },
+            orderBy: { price: sortOrder },
             take: 5,
             select: {
                 title: true,
                 price: true,
                 handle: true,
-                image: true,
-                description: true
+                image: true
             }
         });
 
+        // Step 3: Handle no products case
         if (products.length === 0) {
             return {
                 isKeywordMatch: true,
-                response: "I don't have any products to show you right now. Please check back later!",
+                response:
+                    "I don't have any products to show you right now. Please check back later!",
                 bypassAI: true,
-                creditsUsed: 0.5 // Half credit for database query
+                creditsUsed: 0.5
             };
         }
 
-        const priceLabel = sortOrder === 'asc' ? 'most affordable' : 'premium';
-        const response = `Here are our ${priceLabel} products:\n\n` +
-            products.map((p, i) => `${i + 1}. **${p.title}** - $${p.price}`).join('\n') +
-            '\n\nWould you like more details about any of these products?';
+        // Step 4: Build response
+        const priceLabel = sortOrder === "asc" ? "most affordable" : "premium";
+        const response =
+            `Here are our ${priceLabel} products:\n\n` +
+            products
+                .map((p, i) => `${i + 1}. **${p.title}** - $${p.price}`)
+                .join("\n") +
+            "\n\nWould you like more details about any of these products?";
 
         return {
             isKeywordMatch: true,
             response,
-            productData: products,
+            productData: products.map(p => ({
+                title: p.title,
+                price: p.price,
+                handle: p.handle || undefined,
+                image: p.image || undefined
+            })),
             bypassAI: true,
             creditsUsed: 0.5
         };
     } catch (error) {
-        console.error('[KEYWORD] Price query error:', error);
+        console.error("[KEYWORD] Price query error:", error);
         return { isKeywordMatch: false, creditsUsed: 0 };
     }
 };
 
-const handleBestSellerQuery = async (shop: string, message: string): Promise<KeywordResponse> => {
+/**
+ * Handles best-selling product queries using actual sales data
+ */
+const handleBestSellerQuery = async (
+    shop: string
+): Promise<KeywordResponse> => {
     try {
-        console.log(`[KEYWORD] Finding best sellers from actual sales data for: ${shop}`);
-        
-        // Get best-selling products from OrderItem table (actual sales data)
-        // First get products for this shop to filter order items
+        // Step 1: Get all products for this shop
         const shopProducts = await prisma.product.findMany({
             where: { shop },
             select: { prodId: true, title: true }
@@ -300,224 +551,180 @@ const handleBestSellerQuery = async (shop: string, message: string): Promise<Key
         const shopProductIds = shopProducts.map(p => p.prodId);
 
         if (shopProductIds.length === 0) {
-            // No products found for this shop
             return {
                 isKeywordMatch: true,
-                response: "We're still setting up our product catalog. Please check back soon for our best-selling items!",
+                response:
+                    "We're still setting up our product catalog. Please check back soon for our best-selling items!",
                 bypassAI: true,
                 creditsUsed: 0.3
             };
         }
 
-        // Get recent sales data (last 90 days) for more relevant results
+        // Step 2: Get recent sales data (last 90 days)
         const threeMonthsAgo = new Date();
         threeMonthsAgo.setDate(threeMonthsAgo.getDate() - 90);
 
         let bestSellersData = await prisma.orderItem.groupBy({
-            by: ['productName', 'productId'],
+            by: ["productName", "productId"],
             where: {
-                productId: {
-                    in: shopProductIds
-                },
+                productId: { in: shopProductIds },
                 order: {
-                    createdAt: {
-                        gte: threeMonthsAgo
-                    }
+                    createdAt: { gte: threeMonthsAgo }
                 }
             },
-            _sum: {
-                quantity: true
-            },
-            _count: {
-                productId: true
-            },
+            _sum: { quantity: true },
+            _count: { productId: true },
             orderBy: {
-                _sum: {
-                    quantity: 'desc'
-                }
+                _sum: { quantity: "desc" }
             },
-            take: 8 // Top 8 best sellers
+            take: 8
         });
 
-        // If no recent sales, fall back to all-time sales
+        // Step 3: If no recent sales, fall back to all-time sales
         if (bestSellersData.length === 0) {
-            console.log(`[KEYWORD] No recent sales found, checking all-time sales for: ${shop}`);
             // @ts-expect-error Prisma groupBy orderBy/take typing
             bestSellersData = await prisma.orderItem.groupBy({
-                by: ['productName', 'productId'],
+                by: ["productName", "productId"],
                 where: {
-                    productId: {
-                        in: shopProductIds
-                    }
+                    productId: { in: shopProductIds }
                 },
                 _sum: { quantity: true },
                 _count: { productId: true },
-                orderBy: { _sum: { quantity: 'desc' } },
+                orderBy: {
+                    _sum: { quantity: "desc" }
+                },
                 take: 8
             });
         }
 
         if (bestSellersData.length === 0) {
-            // Fallback to AI settings if no sales data
-            const aiSettings = await prisma.aISettings.findUnique({
-                where: { shop }
-            });
-
-            const predefinedBestSellers = (aiSettings?.settings as any)?.bestSellers || [];
-            
-            if (predefinedBestSellers.length > 0) {
-                const response = "Here are our best-selling products:\n\n" +
-                    predefinedBestSellers.slice(0, 5).map((p: any, i: number) => 
-                        `${i + 1}. **${p.title}** - ${p.description || 'Popular choice!'}`
-                    ).join('\n') +
-                    '\n\nWould you like to know more about any of these?';
-
-                return {
-                    isKeywordMatch: true,
-                    response,
-                    productData: predefinedBestSellers.slice(0, 5),
-                    bypassAI: true,
-                    creditsUsed: 0.3
-                };
-            }
-
-            // No sales data and no predefined best sellers
             return {
                 isKeywordMatch: true,
-                response: "We don't have sales data available yet, but I'd be happy to show you our featured products! Would you like to see our latest arrivals or browse by category?",
+                response:
+                    "We're just getting started! Check back soon to see our best-selling products as customers start shopping!",
                 bypassAI: true,
                 creditsUsed: 0.3
             };
         }
 
-        // Get detailed product information for the best sellers
-        const productIds = bestSellersData
-            .map(item => item.productId)
-            .filter(Boolean) as string[];
+        // Step 4: Get full product details
+        const productIds = bestSellersData.map(item => item.productId);
+        const products = await prisma.product.findMany({
+            where: {
+                shop,
+                prodId: { in: productIds }
+            },
+            select: {
+                prodId: true,
+                title: true,
+                price: true,
+                handle: true,
+                image: true
+            }
+        });
 
-        let detailedProducts: any[] = [];
-        
-        if (productIds.length > 0) {
-            detailedProducts = await prisma.product.findMany({
-                where: {
-                    shop: shop,
-                    prodId: {
-                        in: productIds
-                    }
-                },
-                select: {
-                    title: true,
-                    price: true,
-                    handle: true,
-                    image: true,
-                    prodId: true
-                }
-            });
-        }
+        // Step 5: Match products with sales data and sort
+        const productsWithSales = products
+            .map(product => {
+                const salesData = bestSellersData.find(
+                    item => item.productId === product.prodId
+                );
+                return {
+                    ...product,
+                    totalSold: salesData?._sum.quantity || 0
+                };
+            })
+            .sort((a, b) => (b.totalSold || 0) - (a.totalSold || 0));
 
-        // Merge sales data with product details
-        const bestSellersWithDetails = bestSellersData.map((item, index) => {
-            const productDetail = detailedProducts.find(p => p.prodId === item.productId);
-            
-            return {
-                title: productDetail?.title || item.productName,
-                price: productDetail?.price || null,
-                handle: productDetail?.handle || null,
-                image: productDetail?.image || null
-            };
-        }).slice(0, 6); // Top 6 for display
+        // Step 6: Build response
+        const productList = productsWithSales
+            .slice(0, 6)
+            .map(
+                (p, i) =>
+                    `${i + 1}. **${p.title}** - $${p.price}`
+            )
+            .join("\n");
 
-        // Create formatted response - check if we have recent sales
-        const hasRecentSales = bestSellersData.some(item => item._sum.quantity && item._sum.quantity > 0);
-        const timeFrame = hasRecentSales ? "in the last 3 months" : "of all time";
-        
-        const productList = bestSellersWithDetails.map((product, i) => {
-            const priceText = product.price ? ` - $${product.price}` : '';
-            return `${i + 1}. **${product.title}**${priceText}`;
-        }).join('\n');
-
-        const response = `Here are our best-selling products ${timeFrame}:\n\n${productList}\n\nThese are proven customer favorites! Would you like more details about any of these products?`;
+        const response =
+            `Here are our best-selling products:\n\n${productList}\n\nThese are customer favorites! Would you like more details about any of these products?`;
 
         return {
             isKeywordMatch: true,
             response,
-            productData: bestSellersWithDetails,
+            productData: productsWithSales.map(p => ({
+                title: p.title,
+                price: p.price,
+                handle: p.handle || undefined,
+                image: p.image || undefined
+            })),
             bypassAI: true,
-            creditsUsed: 0.4 // Slightly higher cost for sales data analysis
+            creditsUsed: 0.5
         };
-
     } catch (error) {
-        console.error('[KEYWORD] Best seller query error:', error);
-        // Fall back to AI if database query fails
+        console.error("[KEYWORD] Best seller query error:", error);
         return { isKeywordMatch: false, creditsUsed: 0 };
     }
 };
 
-const handleNewArrivalsQuery = async (shop: string, message: string): Promise<KeywordResponse> => {
+/**
+ * Handles new arrivals queries
+ */
+const handleNewArrivalsQuery = async (
+    shop: string
+): Promise<KeywordResponse> => {
     try {
-        // Get AI settings for predefined new arrivals
-        const aiSettings = await prisma.aISettings.findUnique({
-            where: { shop }
+        // Step 1: Get newest products from database
+        const products = await prisma.product.findMany({
+            where: { shop },
+            orderBy: { createdAt: "desc" },
+            take: 6,
+            select: {
+                title: true,
+                price: true,
+                handle: true,
+                image: true
+            }
         });
 
-        const newArrivals = (aiSettings?.settings as any)?.newArrivals || [];
-        
-        if (newArrivals.length > 0) {
-            const response = "Check out our newest arrivals:\n\n" +
-                newArrivals.slice(0, 5).map((p: any, i: number) => 
-                    `${i + 1}. **${p.title}** - ${p.description}`
-                ).join('\n') +
-                '\n\nAnything catch your eye?';
-
+        if (products.length === 0) {
             return {
                 isKeywordMatch: true,
-                response,
-                productData: newArrivals.slice(0, 5),
+                response:
+                    "We're working on adding new products! Check back soon for our latest arrivals!",
                 bypassAI: true,
                 creditsUsed: 0.3
             };
         }
 
-        // Fallback to recent products from database
-        const recentProducts = await prisma.product.findMany({
-            where: { shop },
-            orderBy: { createdAt: 'desc' },
-            take: 5,
-            select: {
-                title: true,
-                price: true,
-                handle: true,
-                image: true,
-                description: true
-            }
-        });
+        // Step 2: Build response
+        const productList = products
+            .map((p, i) => `${i + 1}. **${p.title}** - $${p.price}`)
+            .join("\n");
 
-        if (recentProducts.length > 0) {
-            const response = "Here are our latest products:\n\n" +
-                recentProducts.map((p, i) => `${i + 1}. **${p.title}** - $${p.price}`).join('\n');
+        const response =
+            `Here are our newest products:\n\n${productList}\n\nWould you like more details about any of these?`;
 
-            return {
-                isKeywordMatch: true,
-                response,
-                productData: recentProducts,
-                bypassAI: true,
-                creditsUsed: 0.5
-            };
-        }
-
-        return { isKeywordMatch: false, creditsUsed: 0 };
+        return {
+            isKeywordMatch: true,
+            response,
+            productData: products.map(p => ({
+                title: p.title,
+                price: p.price,
+                handle: p.handle || undefined,
+                image: p.image || undefined
+            })),
+            bypassAI: true,
+            creditsUsed: 0.5
+        };
     } catch (error) {
-        console.error('[KEYWORD] New arrivals query error:', error);
+        console.error("[KEYWORD] New arrivals query error:", error);
         return { isKeywordMatch: false, creditsUsed: 0 };
     }
 };
 
-const handleCategoryQuery = async (shop: string, message: string): Promise<KeywordResponse> => {
-    // This would require category detection and product filtering
-    // For now, return false to let AI handle it
-    return { isKeywordMatch: false, creditsUsed: 0 };
-};
-
+/**
+ * Handles greeting messages
+ */
 const handleGreeting = (): KeywordResponse => {
     const greetings = [
         "Hello! How can I help you today? 😊",
@@ -526,417 +733,278 @@ const handleGreeting = (): KeywordResponse => {
         "Welcome! How can I assist you today?",
         "Hi! What can I help you with?"
     ];
-    
+
     const response = greetings[Math.floor(Math.random() * greetings.length)];
-    
+
     return {
         isKeywordMatch: true,
         response,
         bypassAI: true,
-        creditsUsed: 0.1 // Very low cost for greetings
+        creditsUsed: 0.1
     };
 };
 
-const handleOrderEditQuery = (): KeywordResponse => {
+/**
+ * Handles compliment messages
+ */
+const handleCompliment = (): KeywordResponse => {
+    const responses = [
+        "Thank you so much! 😊 We really appreciate your kind words and are thrilled to help you!",
+        "That means a lot to us! Thank you for the wonderful feedback! 😊",
+        "You're so kind! We're here to make your shopping experience the best it can be!",
+        "Thank you! We're grateful for your support and happy to assist you! 😊",
+        "That's so nice of you to say! We truly appreciate it and are here whenever you need us!"
+    ];
+
+    const response = responses[Math.floor(Math.random() * responses.length)];
+
     return {
         isKeywordMatch: true,
-        response: "To add items to an existing order, please contact our support team as soon as possible—we'll do our best to accommodate you before it ships. Have your order number and the items you'd like to add ready. If you'd prefer to place a new order instead, I can help you with that! 😊",
+        response,
+        bypassAI: true,
+        creditsUsed: 0.1
+    };
+};
+
+/**
+ * Handles add to cart queries - provides manual instructions
+ */
+const handleAddToCartQuery = (): KeywordResponse => {
+    return {
+        isKeywordMatch: true,
+        response:
+            "I cannot add items to the cart for you directly. To add an item to your cart:\n\n1. **Click on the product** you're interested in to view its product page\n2. **Select your options** (size, color, quantity, etc.) if applicable\n3. **Click the 'Add to Cart' button** on the product page\n4. You can continue shopping or proceed to checkout\n\nIf you need help finding a specific product or have questions about an item, I'm happy to help! 😊",
         bypassAI: true,
         creditsUsed: 0.2
     };
 };
 
-const handleOrderStatusQuery = (): KeywordResponse => {
-    return {
-        isKeywordMatch: true,
-        response: "I'd be happy to help you track your order! Could you please provide your order number or the email address you used for your purchase?",
-        bypassAI: true,
-        creditsUsed: 0.2
-    };
-};
-
-const handleGeneralProductQuery = async (shop: string, message: string): Promise<KeywordResponse> => {
+/**
+ * Handles order status queries - provides tracking guidance
+ */
+const handleOrderStatusQuery = async (shop: string): Promise<KeywordResponse> => {
     try {
-        console.log(`[KEYWORD] Handling general product query for: ${shop}`);
-        
-        // Get a variety of products from database (mix of different categories/prices)
-        const products = await prisma.product.findMany({
-            where: { shop },
-            orderBy: [
-                { createdAt: 'desc' }, // Recent products first
-            ],
-            take: 8, // Show up to 8 products
-            select: {
-                title: true,
-                price: true,
-                handle: true,
-                image: true,
-                tags: true
-            }
-        });
-
-        if (products.length === 0) {
-            return {
-                isKeywordMatch: true,
-                response: "We're currently updating our product catalog. Please check back soon, or feel free to ask about specific items you're looking for!",
-                bypassAI: true,
-                creditsUsed: 0.3
-            };
-        }
-
-        // Create a nice formatted response
-        const productList = products.slice(0, 6).map((p, i) => {
-            const priceText = p.price ? `$${p.price}` : 'Price on request';
-            return `${i + 1}. **${p.title}** - ${priceText}`;
-        }).join('\n');
-
-        const response = `Here are some of our products:\n\n${productList}\n\n${products.length > 6 ? `And ${products.length - 6} more items available! ` : ''}Would you like more details about any of these, or are you looking for something specific?`;
-
-        return {
-            isKeywordMatch: true,
-            response,
-            productData: products,
-            bypassAI: true,
-            creditsUsed: 0.5 // Slightly higher cost for database query
-        };
-    } catch (error) {
-        console.error('[KEYWORD] General product query error:', error);
-        // Fall back to AI if database query fails
-        return { isKeywordMatch: false, creditsUsed: 0 };
-    }
-};
-
-const handleStoreInfoQuery = async (shop: string, message: string): Promise<KeywordResponse> => {
-    try {
-        console.log(`[KEYWORD] Handling store info query for: ${shop}`);
-        
-        // Get AI settings to get store information
+        // Step 1: Get store information
         const aiSettings = await prisma.aISettings.findUnique({
             where: { shop }
         });
 
-        const settings = aiSettings?.settings as any;
+        const settings = aiSettings?.settings as {
+            storeDetails?: { name?: string };
+        } | null;
         const storeDetails = settings?.storeDetails || {};
-        
-        // Extract store information
         const storeName = storeDetails.name || extractStoreNameFromShop(shop);
-        const storeAbout = storeDetails.about || '';
-        const storeLocation = storeDetails.location || '';
-        
-        // Build response based on available information
-        let response = `Hello! I'm the assistant for **${storeName}**.`;
-        
-        if (storeAbout) {
-            response += ` ${storeAbout.substring(0, 200)}${storeAbout.length > 200 ? '...' : ''}`;
-        }
-        
-        if (storeLocation) {
-            response += ` We're located in ${storeLocation}.`;
-        }
-        
-        response += ' How can I help you today?';
-        
+
+        // Step 2: Build helpful guidance response
+        let response = `I'd be happy to help you check your order status! 😊\n\n`;
+        response += `**Here's how you can track your order from ${storeName}:**\n\n`;
+        response += `1. **Check your email** - You should have received an order confirmation email with your order number and a tracking link.\n\n`;
+        response += `2. **Visit your account** - If you created an account, log in to your account on our website to view all your orders and their current status.\n\n`;
+        response += `3. **Use the tracking link** - Click the tracking link in your confirmation email to see real-time updates from the shipping carrier.\n\n`;
+        response += `4. **Contact support** - If you can't find your order confirmation or need additional help, please contact our support team with your order number or the email address you used for your purchase.\n\n`;
+        response += `**Need your order number?** It's usually in the format like #12345 and can be found in:\n`;
+        response += `• Your order confirmation email\n`;
+        response += `• Your account order history\n`;
+        response += `• Your receipt (if you received one)\n\n`;
+        response += `Is there anything else I can help you with regarding your order?`;
+
         return {
             isKeywordMatch: true,
             response,
             bypassAI: true,
-            creditsUsed: 0.2 // Low cost for store info
+            creditsUsed: 0.2
         };
     } catch (error) {
-        console.error('[KEYWORD] Store info query error:', error);
-        
-        // Fallback response with basic store name
-        const storeName = extractStoreNameFromShop(shop);
+        console.error("[KEYWORD] Order status query error:", error);
+        // Fallback response
         return {
             isKeywordMatch: true,
-            response: `Hello! I'm the assistant for **${storeName}**. How can I help you today?`,
+            response:
+                "I'd be happy to help you check your order status! 😊\n\n**Here's how you can track your order:**\n\n1. **Check your email** - Look for your order confirmation email which contains your order number and tracking link.\n\n2. **Visit your account** - Log in to your account on our website to view all your orders and their current status.\n\n3. **Use the tracking link** - Click the tracking link in your confirmation email for real-time shipping updates.\n\n4. **Contact support** - If you need additional help, please contact our support team with your order number or email address.\n\nIs there anything else I can help you with?",
             bypassAI: true,
             creditsUsed: 0.2
         };
     }
 };
 
-const handlePolicyQuery = async (shop: string, message: string): Promise<KeywordResponse> => {
+/**
+ * Handles policy queries - CRITICAL: NEVER returns products
+ * Fixes "Furniture Fallback Bug" - policy questions should only return policy info
+ */
+const handlePolicyQuery = async (
+    shop: string,
+    message: string,
+    policyTypeHint?: "shipping" | "return" | "refund" | "payment" | "privacy" | "terms"
+): Promise<KeywordResponse> => {
     try {
-        console.log(`[KEYWORD] Handling policy query for: ${shop}`);
-        
-        // Get AI settings to fetch policy information
+        // Step 1: Get AI settings to fetch policy information
         const aiSettings = await prisma.aISettings.findUnique({
             where: { shop }
         });
 
-        const settings = aiSettings?.settings as any;
+        const settings = aiSettings?.settings as {
+            policies?: {
+                shipping?: string;
+                returns?: string;
+                refunds?: string;
+                refund?: string;
+                payment?: string;
+                privacy?: string;
+                terms?: string;
+            };
+        } | null;
         const policies = settings?.policies || {};
-        
-        // Determine which policy is being asked about
+
+        // Step 2: Determine policy type
         const lowerMessage = message.toLowerCase();
-        let policyType = '';
-        let policyContent = '';
-        
-        if (lowerMessage.includes('shipping')) {
-            policyType = 'Shipping Policy';
-            policyContent = policies.shipping || '';
-        } else if (lowerMessage.includes('return')) {
-            policyType = 'Return Policy';  
-            policyContent = policies.returns || '';
-        } else if (lowerMessage.includes('refund')) {
-            policyType = 'Refund Policy';
-            policyContent = policies.refunds || policies.refund || '';
-        } else if (lowerMessage.includes('privacy')) {
-            policyType = 'Privacy Policy';
-            policyContent = policies.privacy || '';
-        } else if (lowerMessage.includes('terms')) {
-            policyType = 'Terms of Service';
-            policyContent = policies.terms || '';
+        let policyType = "";
+        let policyContent = "";
+
+        if (policyTypeHint) {
+            // Use the classified policy type
+            switch (policyTypeHint) {
+                case "shipping":
+                    policyType = "Shipping Policy";
+                    policyContent = policies.shipping || "";
+                    break;
+                case "return":
+                    policyType = "Return Policy";
+                    policyContent = policies.returns || "";
+                    break;
+                case "refund":
+                    policyType = "Refund Policy";
+                    policyContent = policies.refunds || policies.refund || "";
+                    break;
+                case "payment":
+                    policyType = "Payment Policy";
+                    policyContent = policies.payment || "";
+                    break;
+                case "privacy":
+                    policyType = "Privacy Policy";
+                    policyContent = policies.privacy || "";
+                    break;
+                case "terms":
+                    policyType = "Terms of Service";
+                    policyContent = policies.terms || "";
+                    break;
+            }
         } else {
-            // General policy question - provide overview
+            // Fallback: auto-detect from message
+            if (lowerMessage.includes("shipping")) {
+                policyType = "Shipping Policy";
+                policyContent = policies.shipping || "";
+            } else if (lowerMessage.includes("return")) {
+                policyType = "Return Policy";
+                policyContent = policies.returns || "";
+            } else if (lowerMessage.includes("refund")) {
+                policyType = "Refund Policy";
+                policyContent = policies.refunds || policies.refund || "";
+            } else if (lowerMessage.includes("payment")) {
+                policyType = "Payment Policy";
+                policyContent = policies.payment || "";
+            } else if (lowerMessage.includes("privacy")) {
+                policyType = "Privacy Policy";
+                policyContent = policies.privacy || "";
+            } else if (lowerMessage.includes("terms")) {
+                policyType = "Terms of Service";
+                policyContent = policies.terms || "";
+            }
+        }
+
+        // Step 3: Handle no specific policy found
+        if (!policyType && !policyContent) {
             const availablePolicies = [];
-            if (policies.shipping?.trim()) availablePolicies.push('Shipping');
-            if (policies.returns?.trim()) availablePolicies.push('Returns'); 
-            if (policies.refunds?.trim() || policies.refund?.trim()) availablePolicies.push('Refunds');
-            if (policies.privacy?.trim()) availablePolicies.push('Privacy');
-            if (policies.terms?.trim()) availablePolicies.push('Terms of Service');
-            if (policies.payment?.trim()) availablePolicies.push('Payment');
-            
+            if (policies.shipping?.trim()) availablePolicies.push("Shipping");
+            if (policies.returns?.trim()) availablePolicies.push("Returns");
+            if (policies.refunds?.trim() || policies.refund?.trim())
+                availablePolicies.push("Refunds");
+            if (policies.privacy?.trim()) availablePolicies.push("Privacy");
+            if (policies.terms?.trim()) availablePolicies.push("Terms of Service");
+            if (policies.payment?.trim()) availablePolicies.push("Payment");
+
             if (availablePolicies.length > 0) {
+                // CRITICAL: Policy queries NEVER return products
                 return {
                     isKeywordMatch: true,
-                    response: `I'd be happy to help you with our store policies! 😊 Here's what I can tell you about:\n\n• ${availablePolicies.join('\n• ')}\n\nWhich specific policy would you like to learn more about? Just let me know and I'll provide the details!`,
+                    response: `I'd be happy to help you with our store policies! 😊 Here's what I can tell you about:\n\n• ${availablePolicies.join("\n• ")}\n\nWhich specific policy would you like to learn more about? Just let me know and I'll provide the details!`,
+                    productData: [], // Explicitly empty
                     bypassAI: true,
                     creditsUsed: 0.3
                 };
             } else {
                 // Even with no configured policies, provide a helpful response
                 const storeName = extractStoreNameFromShop(shop);
+                // CRITICAL: Policy queries NEVER return products
                 return {
                     isKeywordMatch: true,
                     response: `I'd love to help you with our store policies! 😊 While I'm getting the detailed policy information ready, I can tell you that ${storeName} is committed to providing excellent customer service.\n\nFor the most up-to-date information about our shipping, returns, and other policies, please feel free to contact our support team or check our website. Is there anything specific about our policies you'd like to know? I'm here to help!`,
+                    productData: [], // Explicitly empty
                     bypassAI: true,
                     creditsUsed: 0.3
                 };
             }
         }
-        
-        // Return specific policy content
-        if (policyContent) {
+
+        // Step 4: Return specific policy content
+        if (policyContent && policyType) {
             // Truncate very long policies for chat-friendly response
             const maxLength = 400;
             let responseContent = policyContent.trim();
-            
+
             if (responseContent.length > maxLength) {
                 // Try to break at sentence end if possible
                 const truncated = responseContent.substring(0, maxLength);
-                const lastSentence = truncated.lastIndexOf('.');
+                const lastSentence = truncated.lastIndexOf(".");
                 if (lastSentence > maxLength - 100) {
                     responseContent = truncated.substring(0, lastSentence + 1);
                 } else {
-                    responseContent = truncated + '...';
+                    responseContent = truncated + "...";
                 }
             }
-            
-            const response = `Here's our **${policyType}**:\n\n${responseContent}\n\n${responseContent.includes('...') ? 'This is a summary. For complete details, please visit our website or contact support.\n\n' : ''}Is there anything specific you'd like to know more about?`;
-            
+
+            // CRITICAL: Policy queries NEVER return products
             return {
                 isKeywordMatch: true,
-                response,
-                bypassAI: true,
-                creditsUsed: 0.4
-            };
-        } else {
-            // Policy type identified but no content available
-            const storeName = extractStoreNameFromShop(shop);
-            return {
-                isKeywordMatch: true,
-                response: `Great question about our ${policyType.toLowerCase()}! 😊 While I'm getting those specific details organized for you, I want to assure you that ${storeName} is committed to fair and transparent policies.\n\nFor the most current ${policyType.toLowerCase()} information, I'd recommend checking our website or contacting our support team - they'll have all the detailed information you need. In the meantime, is there anything else I can help you with today?`,
+                response: `Here's our **${policyType}**:\n\n${responseContent}\n\nFor complete details, please visit our website or contact support.`,
+                productData: [], // Explicitly empty
                 bypassAI: true,
                 creditsUsed: 0.3
             };
         }
-        
+
+        // Step 5: Fallback if policy type found but no content
+        const storeName = extractStoreNameFromShop(shop);
+        return {
+            isKeywordMatch: true,
+            response: `Great question about our ${policyType.toLowerCase()}! 😊 While I'm getting those specific details organized for you, I want to assure you that ${storeName} is committed to fair and transparent policies.\n\nFor the most current ${policyType.toLowerCase()} information, I'd recommend checking our website or contacting our support team - they'll have all the detailed information you need. In the meantime, is there anything else I can help you with today?`,
+            productData: [], // Explicitly empty
+            bypassAI: true,
+            creditsUsed: 0.3
+        };
     } catch (error) {
-        console.error('[KEYWORD] Policy query error:', error);
-        // Fall back to AI if database query fails
-        return { isKeywordMatch: false, creditsUsed: 0 };
+        console.error("[KEYWORD] Policy query error:", error);
+        const storeName = extractStoreNameFromShop(shop);
+        return {
+            isKeywordMatch: true,
+            response: `I'd love to help you with our store policies! 😊 While I'm getting the detailed policy information ready, I can tell you that ${storeName} is committed to providing excellent customer service.\n\nFor the most up-to-date information about our shipping, returns, and other policies, please feel free to contact our support team or check our website. Is there anything specific about our policies you'd like to know? I'm here to help!`,
+            productData: [], // Explicitly empty
+            bypassAI: true,
+            creditsUsed: 0.3
+        };
     }
 };
 
-// Helper function to extract store name from shop domain
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
+/**
+ * Extracts store name from shop domain
+ */
 const extractStoreNameFromShop = (shop: string): string => {
-    // Remove .myshopify.com and capitalize
-    const storeName = shop.replace('.myshopify.com', '').replace(/-/g, ' ');
-    return storeName.split(' ')
+    const storeName = shop.replace(".myshopify.com", "").replace(/-/g, " ");
+    return storeName
+        .split(" ")
         .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ');
-};
-
-// ============================================================================
-// OPTIMIZATION HELPERS
-// ============================================================================
-
-const buildOptimizedSystemPrompt = (
-    aiSettings?: any,
-    productMatchInfo?: { hasRelevantResults: boolean; topScore?: number },
-    userMessage?: string
-): string => {
-    // Build a comprehensive, professional system prompt (CHATBOT-TESTING improvements)
-    let prompt = `You are a professional customer service assistant for this e-commerce store. You are knowledgeable, helpful, and represent the brand with excellence.
-
-CORE BEHAVIOR:
-- Always be friendly, professional, and solution-oriented
-- Provide specific, actionable information when available (use exact numbers: $50, $100, etc.—never "a certain amount")
-- If you don't have specific information, offer helpful alternatives
-- Never say "I'm just an AI" - you represent this store
-- Focus on helping customers achieve their goals
-- Use natural, conversational language
-
-RESPONSE GUIDELINES:
-- Keep responses concise but complete (2-4 sentences typically)
-- Be enthusiastic about the store's products and services
-- Offer to help with related questions
-- Always maintain a positive, can-do attitude`;
-
-    // CHATBOT-TESTING FIX: No irrelevant fallback — never substitute best-sellers for specific product queries
-    if (productMatchInfo && !productMatchInfo.hasRelevantResults && userMessage) {
-        prompt += `
-
-CRITICAL - PRODUCT QUERY WITH NO MATCH:
-- The user asked about a SPECIFIC type of product (e.g. blenders, vegan boots, a particular category).
-- We have NO matching products in our store for that request.
-- You MUST say something like: "I couldn't find any [X] in our store right now." or "We don't currently carry [X]."
-- NEVER suggest unrelated products (e.g. bracelets, furniture) or best-sellers as substitutes.
-- You MAY offer: "Would you like me to suggest something else from our collection, or would you prefer to check back later?"`;
-    }
-
-    // CHATBOT-TESTING FIX: Negative constraints (hates, don't want, exclude)
-    prompt += `
-
-NEGATIVE PREFERENCES:
-- When the user says they hate, dislike, avoid, don't want, or exclude something (e.g. "hates green", "no leather", "under $50"), STRICTLY exclude those.
-- Do NOT recommend any product that matches the excluded attribute.
-- If all matches violate their preference, say so and suggest only alternatives that respect it.`;
-
-    // Add merchant-specific AI instructions
-    if (aiSettings?.aiInstructions?.trim()) {
-        const instructions = aiSettings.aiInstructions.substring(0, 300);
-        prompt += `\n\nMERCHANT INSTRUCTIONS:\n${instructions}`;
-    }
-
-    // Add response tone and style
-    const tone = aiSettings?.responseTone?.selectedTone?.[0] || 'friendly';
-    const customToneInstructions = aiSettings?.responseTone?.customInstructions;
-    
-    prompt += `\n\nTONE & STYLE:
-- Primary tone: ${tone}`;
-    
-    if (customToneInstructions?.trim()) {
-        prompt += `\n- Custom style: ${customToneInstructions.substring(0, 150)}`;
-    }
-
-    // Add response settings
-    const responseLength = aiSettings?.responseSettings?.length?.[0] || 'balanced';
-    const useEmojis = aiSettings?.responseSettings?.style?.includes('emojis') || false;
-    
-    prompt += `\n- Response length: ${responseLength}`;
-    if (useEmojis) {
-        prompt += '\n- Use appropriate emojis to enhance communication';
-    }
-
-    // Add store information
-    if (aiSettings?.storeDetails?.about?.trim()) {
-        const storeInfo = aiSettings.storeDetails.about.substring(0, 200);
-        prompt += `\n\nSTORE INFORMATION:\n${storeInfo}`;
-    }
-    
-    if (aiSettings?.storeDetails?.location?.trim()) {
-        prompt += `\nLocation: ${aiSettings.storeDetails.location}`;
-    }
-
-    // CHATBOT-TESTING FIX: Use full policy text so exact $ amounts (shipping threshold) are included
-    const policies = aiSettings?.policies || {};
-    const policyCharLimit = 400; // Enough to include "$50", "$100", etc.
-    if (policies.shipping?.trim() || policies.payment?.trim() || policies.refund?.trim()) {
-        prompt += `\n\nKEY POLICIES (use exact amounts—never "a certain amount"):`;
-        
-        if (policies.shipping?.trim()) {
-            prompt += `\n- Shipping: ${policies.shipping.substring(0, policyCharLimit)}`;
-        }
-        if (policies.payment?.trim()) {
-            prompt += `\n- Payment: ${policies.payment.substring(0, policyCharLimit)}`;
-        }
-        if (policies.refund?.trim()) {
-            prompt += `\n- Returns/Refunds: ${policies.refund.substring(0, policyCharLimit)}`;
-        }
-    }
-
-    // Featured products — only for general recommendations; never as fallback for specific-no-match
-    const recommendedProducts = aiSettings?.recommendedProducts || [];
-    const bestSellers = aiSettings?.bestSellers || [];
-    const newArrivals = aiSettings?.newArrivals || [];
-    
-    if (recommendedProducts.length > 0 || bestSellers.length > 0 || newArrivals.length > 0) {
-        prompt += `\n\nFEATURED PRODUCTS (use only when user asks generally, e.g. "what do you recommend?"—never when they asked for a specific category we don't have):`;
-        
-        if (bestSellers.length > 0) {
-            const topSellers = bestSellers.slice(0, 3).map((p: any) => p.title).join(', ');
-            prompt += `\n- Best sellers: ${topSellers}`;
-        }
-        
-        if (newArrivals.length > 0) {
-            const newItems = newArrivals.slice(0, 3).map((p: any) => p.title).join(', ');
-            prompt += `\n- New arrivals: ${newItems}`;
-        }
-        
-        if (recommendedProducts.length > 0) {
-            const recommended = recommendedProducts.slice(0, 3).map((p: any) => p.title).join(', ');
-            prompt += `\n- Recommended: ${recommended}`;
-        }
-    }
-
-    // Language settings
-    const primaryLanguage = aiSettings?.languageSettings?.primaryLanguage || 'english';
-    if (primaryLanguage !== 'english') {
-        prompt += `\n\nLANGUAGE: Respond primarily in ${primaryLanguage}. Auto-detect customer language if enabled.`;
-    }
-
-    prompt += `\n\nREMEMBER: You represent this store with pride and professionalism. Focus on creating an excellent customer experience.`;
-    
-    return prompt;
-};
-
-const buildProductContextFromResults = (pineconeResults: any[]): string | undefined => {
-    if (!pineconeResults || pineconeResults.length === 0) return undefined;
-    
-    // Build concise product context from existing results
-    const productContext = pineconeResults
-        .filter((match: any) => match.metadata?.type === "PRODUCT")
-        .slice(0, 5) // Limit to top 5 for token efficiency
-        .map((match: any) => {
-            const metadata = match.metadata || {};
-            // Return only essential info to save tokens
-            return `${metadata.title}: $${metadata.price} - ${(metadata.text_content || '').substring(0, 80)}`;
-        })
-        .filter(Boolean)
-        .join('\n');
-        
-    return productContext || undefined;
-};
-
-const getRelevantProductContext = async (shop: string, userMessage: string): Promise<string | undefined> => {
-    try {
-        // Use Pinecone for semantic search but limit results
-        const results = await queryPinecone(shop, userMessage, 3); // Only top 3 results
-        
-        if (results.length === 0) return undefined;
-        
-        return buildProductContextFromResults(results);
-    } catch (error) {
-        console.error('[OPTIMIZE] Product context error:', error);
-        return undefined;
-    }
-};
-
-const estimateTokens = (text: string): number => {
-    // Rough estimation: 1 token ≈ 0.75 words
-    const wordCount = text.split(/\s+/).length;
-    return Math.ceil(wordCount / 0.75);
+        .join(" ");
 };

@@ -1,3 +1,5 @@
+/* app/services/openaiService.ts */
+
 import { generateEmbeddings, checkPineconeNamespace } from "./pineconeService";
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
@@ -9,25 +11,25 @@ const INDEX_HOST = process.env.INDEX_HOST || "";
 // ============================================================================
 const queryPineconeWithRetry = async (url: string, options: RequestInit, maxRetries: number = 3): Promise<Response> => {
     let lastError: Error | null = null;
-    
+
     for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
             const response = await fetch(url, options);
-            
+
             // If rate limited (429), wait and retry
             if (response.status === 429) {
                 const retryAfter = response.headers.get('retry-after');
                 const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : Math.pow(2, attempt) * 1000; // Exponential backoff
-                
+
                 console.warn(`[Pinecone] Rate limited, waiting ${waitTime}ms before retry ${attempt + 1}/${maxRetries}`);
                 await new Promise(resolve => setTimeout(resolve, waitTime));
                 continue;
             }
-            
+
             return response;
         } catch (error) {
             lastError = error instanceof Error ? error : new Error(String(error));
-            
+
             if (attempt < maxRetries - 1) {
                 const waitTime = Math.pow(2, attempt) * 1000; // Exponential backoff
                 console.warn(`[Pinecone] Request failed, retrying in ${waitTime}ms (attempt ${attempt + 1}/${maxRetries}):`, error);
@@ -35,41 +37,41 @@ const queryPineconeWithRetry = async (url: string, options: RequestInit, maxRetr
             }
         }
     }
-    
+
     throw lastError || new Error("Max retries exceeded");
 };
 
 // Helper function for OpenAI API with retry logic
 const openaiApiWithRetry = async (url: string, options: RequestInit, maxRetries: number = 3): Promise<Response> => {
     let lastError: Error | null = null;
-    
+
     for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
             const response = await fetch(url, options);
-            
+
             // If rate limited (429), check if we should retry or fail fast
             if (response.status === 429) {
                 const errorBody = await response.text();
                 const retryAfter = response.headers.get('retry-after');
                 const waitTime = retryAfter ? parseInt(retryAfter) * 1000 : Math.pow(2, attempt + 1) * 2000; // Longer backoff
-                
+
                 console.warn(`[OpenAI] Rate limited (attempt ${attempt + 1}/${maxRetries}): ${errorBody}`);
-                
+
                 // If this is the last attempt, don't wait - just fail
                 if (attempt === maxRetries - 1) {
                     console.error(`[OpenAI] Persistent rate limiting after ${maxRetries} attempts`);
                     throw new Error("QUOTA_EXCEEDED");
                 }
-                
+
                 console.warn(`[OpenAI] Waiting ${waitTime}ms before retry`);
                 await new Promise(resolve => setTimeout(resolve, waitTime));
                 continue;
             }
-            
+
             return response;
         } catch (error) {
             lastError = error instanceof Error ? error : new Error(String(error));
-            
+
             if (attempt < maxRetries - 1) {
                 const waitTime = Math.pow(2, attempt + 1) * 1000; // Exponential backoff
                 console.warn(`[OpenAI] Request failed, retrying in ${waitTime}ms (attempt ${attempt + 1}/${maxRetries}):`, error);
@@ -77,7 +79,7 @@ const openaiApiWithRetry = async (url: string, options: RequestInit, maxRetries:
             }
         }
     }
-    
+
     throw lastError || new Error("Max retries exceeded for OpenAI API");
 };
 
@@ -219,11 +221,12 @@ export const generateAIResponse = async (
     productContext?: string
 ) => {
     try {
+
         const systemMessage = {
             role: "system" as const,
-            content: systemPrompt + (productContext ? `\n\nRelevant Product Information:\n${productContext}` : "")
+            content: systemPrompt + (productContext ? `\n\nCONTEXT:\n${productContext}` : "")
         };
-        console.log("[OpenAI System Message]", systemMessage);
+
         const response = await openaiApiWithRetry("https://api.openai.com/v1/chat/completions", {
             method: "POST",
             headers: {
@@ -231,12 +234,13 @@ export const generateAIResponse = async (
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({
-                model: "gpt-4",
+                model: "gpt-4o-mini", // FIX: Speed & Cost
                 messages: [systemMessage, ...messages],
-                temperature: 0.7,
-                max_tokens: 1000
+                temperature: 0.5, // Lower temp = Less hallucinations
+                max_tokens: 300 // Faster, concise chat responses
             })
         });
+
         console.log("[OpenAI Response Status]", response.status);
         if (!response.ok) {
             const errorText = await response.text();
@@ -247,7 +251,7 @@ export const generateAIResponse = async (
                 console.error(`[OpenAI] Failed to parse error response: ${errorText}`);
                 throw new Error(`OpenAI API error (${response.status}): ${errorText}`);
             }
-            
+
             const errorMessage = error?.error?.message || "Unknown error";
             const errorCode = error?.error?.code || "unknown";
             const errorType = error?.error?.type || "unknown";
@@ -278,12 +282,12 @@ export const generateAIResponse = async (
         return data.choices[0]?.message?.content || "I apologize, but I couldn't generate a response.";
     } catch (error) {
         console.error("[OpenAI Error]:", error);
-        
+
         // Re-throw quota exceeded error with specific identifier
         if (error instanceof Error && error.message === "QUOTA_EXCEEDED") {
             throw error;
         }
-        
+
         // Re-throw other errors
         throw error;
     }
