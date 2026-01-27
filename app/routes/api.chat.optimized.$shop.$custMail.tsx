@@ -397,7 +397,6 @@ async function performIntelligentRetrieval(
     message: string,
     history: Array<{ role: string; content: string }>
 ): Promise<RetrievalResult> {
-    // Initialize return values
     let productData: ProductData[] = [];
     let pineconeMatches: Array<{
         metadata?: Record<string, unknown>;
@@ -405,14 +404,20 @@ async function performIntelligentRetrieval(
     }> = [];
     let matchInfo: ProductMatchInfo = { hasRelevantResults: false };
 
-    // Step 1: Check if this is a product query at all
-    const isProductQuery = checkIfProductQuery(message);
-    if (!isProductQuery) {
-        return { productData, pineconeMatches, matchInfo };
+    // 1. Refinement Guard (Pronouns only)
+    const refinementPronounRegex = /\b(it|that|this|them|those|one|ones)\b/i;
+    // We only skip if the user message is VERY short and contains a pronoun (e.g. "How much is it?")
+    // If they say "Show me that jacket", we still want to search "jacket".
+    const isPurePronoun =
+        refinementPronounRegex.test(message) &&
+        message.split(" ").length < 5 &&
+        !checkIfProductQuery(message);
+
+    if (isPurePronoun) {
+        return { productData: [], pineconeMatches: [], matchInfo };
     }
 
-    // 1. Setup Keyword Extraction
-    // Remove stop words to find the "core" search terms (e.g., "leather", "jacket", "gold")
+    // 2. Keyword Extraction (Dynamic for any store)
     const stopWords = new Set([
         "show",
         "me",
@@ -431,41 +436,30 @@ async function performIntelligentRetrieval(
         "please",
         "i",
         "need",
-        "want"
+        "want",
+        "looking",
+        "recommend"
     ]);
     const rawWords = message.toLowerCase().split(/[^a-z0-9]+/i);
+    // Filter words longer than 2 chars that aren't stop words
     const searchKeywords = rawWords.filter(
         w => w.length > 2 && !stopWords.has(w)
     );
 
-    // Check if it's a refinement ("that one", "in red") with ONLY pronouns/adjectives
-    const isRefinement =
-        /\b(it|that|this|them|those|one|ones)\b/i.test(message) &&
-        searchKeywords.length === 0;
-
-    // 2. Logic: If it's PURELY a pronoun refinement ("How much is it?"), skip new search.
-    // The AI will rely on conversation history instead of a fresh Pinecone query.
-    if (isRefinement) {
-        return { productData: [], pineconeMatches: [], matchInfo };
-    }
-
-    // 3. Build Search Query
-    // If we found keywords (e.g. "Leather Jacket"), use those. If not, use full message.
+    // 3. Contextual Query Building
     const lastUserMsg =
         history.filter(m => m.role === "user").slice(-2)[0]?.content || "";
     let searchQuery = message;
 
-    if (searchKeywords.length > 0) {
-        searchQuery = searchKeywords.join(" "); // Focused search
-    } else if (message.length < 15) {
-        searchQuery = `${message} ${lastUserMsg}`; // Contextual fallback for short queries
+    // If message is short/ambiguous, append slight context, otherwise trust the user's specific query
+    if (message.length < 10) {
+        searchQuery = `${message} ${lastUserMsg}`;
     }
 
-    // 4. Query Pinecone (Increase depth to 40)
-    // We fetch a large pool to ensure we don't miss items that have low vector scores but high keyword relevance
+    // 4. Query Pinecone (Top 40 - Broad Net)
     pineconeMatches = await queryPinecone(shop, searchQuery, 40);
 
-    // 5. HYBRID RE-RANKING (Vector + Keyword Boost)
+    // 5. HYBRID SCORING (Vector + Keyword Boost)
     const boostedMatches = pineconeMatches
         .filter(m => m.metadata?.type === "PRODUCT")
         .map(match => {
@@ -473,76 +467,77 @@ async function performIntelligentRetrieval(
             let hasKeywordMatch = false;
 
             const title = ((match.metadata?.title as string) || "").toLowerCase();
-            const tags = Array.isArray(match.metadata?.tags)
-                ? (match.metadata!.tags as string[]).join(" ").toLowerCase()
-                : "";
+            const handle = (
+                (match.metadata?.handle as string) || ""
+            ).toLowerCase();
             const type = (
                 (match.metadata?.productType as string) || ""
             ).toLowerCase();
 
+            // Handle Tags (Handle string[] or string format from metadata)
+            let tagsString = "";
+            if (Array.isArray(match.metadata?.tags)) {
+                tagsString = (match.metadata!.tags as string[])
+                    .join(" ")
+                    .toLowerCase();
+            } else if (typeof match.metadata?.tags === "string") {
+                tagsString = (match.metadata!.tags as string).toLowerCase();
+            }
+
             searchKeywords.forEach(keyword => {
-                // Singularize (simple check)
+                // Singularize simple check (plant vs plants)
                 const singular = keyword.endsWith("s")
                     ? keyword.slice(0, -1)
                     : keyword;
 
-                // Boost Logic
+                // Rule A: Title Match (High Priority)
                 if (title.includes(keyword) || title.includes(singular)) {
-                    // Massive boost for Title match
-                    boost += 0.25;
+                    boost += 0.3;
                     hasKeywordMatch = true;
-                } else if (
-                    tags.includes(keyword) ||
-                    (singular && tags.includes(singular))
+                }
+                // Rule B: Tag/Type Match (Medium Priority)
+                else if (
+                    tagsString.includes(keyword) ||
+                    tagsString.includes(singular) ||
+                    type.includes(keyword)
                 ) {
-                    // Big boost for Tag match
+                    boost += 0.2;
+                    hasKeywordMatch = true;
+                }
+                // Rule C: Handle/URL Match
+                else if (handle.includes(keyword)) {
                     boost += 0.15;
                     hasKeywordMatch = true;
-                } else if (type.includes(keyword)) {
-                    // Medium boost for Type match
-                    boost += 0.1;
                 }
             });
 
             return {
                 ...match,
                 originalScore: match.score || 0,
-                score: (match.score || 0) + boost, // Artificially inflated score
+                score: (match.score || 0) + boost,
                 hasKeywordMatch
-            } as typeof match & {
-                originalScore: number;
-                score: number;
-                hasKeywordMatch: boolean;
             };
         })
-        .sort((a, b) => b.score - a.score); // Sort by new boosted score
+        .sort((a, b) => b.score - a.score);
 
-    // 6. Filtering Strategy (Trust Keywords)
+    // 6. DYNAMIC FILTERING
     let validMatches = boostedMatches.filter(p => {
-        // Acceptance Criteria:
-        // 1. Very high vector match (Semantic match, e.g. "Coat" matching "Jacket") -> Score > 0.60
-        // 2. Decent vector match WITH Keyword (Hybrid match) -> Score > 0.40
+        // Condition 1: Strong Keyword Match (Trust the database text)
+        // If "Garden" is in the tags, show it even if vector score is mediocre.
+        if (p.hasKeywordMatch && p.score >= 0.35) return true;
 
-        if (p.score >= 0.6) return true; // High confidence vector or boosted
-        if (p.hasKeywordMatch && p.score >= 0.4) return true; // Trust the keyword match
+        // Condition 2: High Semantic Match (Trust the AI vectors)
+        // Catches "Sit on" -> "Sofa" where text doesn't match.
+        // Threshold 0.52 is safe for top-k results in Pinecone.
+        if ((p.originalScore || 0) >= 0.52) return true;
 
         return false;
     });
 
-    // 7. Strict Fallback (Anti-Hallucination)
-    // If strict filtering returned nothing, do we show anything?
-    if (validMatches.length === 0) {
-        // Only show loose matches if they DEFINITELY have a keyword match.
-        // Never show random items based on low vector scores alone.
-        validMatches = boostedMatches
-            .filter(p => p.hasKeywordMatch && p.originalScore > 0.25)
-            .slice(0, 3);
-    }
-
-    // Limit to top 6
+    // 7. Limit Results
     validMatches = validMatches.slice(0, 6);
 
-    // 8. Map to Output
+    // 8. Map Data
     productData = validMatches.map(m => ({
         id: m.metadata?.product_id as string,
         title: m.metadata?.title as string,
