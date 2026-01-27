@@ -11,7 +11,6 @@ async function getProductTitle() {
             collection: true,
             options: true,
             price: true,
-            image: true,
             variants: {
                 select: {
                     title: true

@@ -1,5 +1,4 @@
 import { CallbackEvent } from "@shopify/polaris-types";
-import { CustomPicks } from "app/components/AIPersonalityAndBehavior/CustomPicks";
 import { LanguageSettings, LanguageSettingsData } from "app/components/AIPersonalityAndBehavior/LanguageSettings";
 import { Policies, PoliciesData } from "app/components/AIPersonalityAndBehavior/Policies";
 import { RecommendedProducts, Product } from "app/components/AIPersonalityAndBehavior/RecommendedProducts";
@@ -21,8 +20,6 @@ export interface AISettingsState {
     recommendedProducts: Product[];
     storeDetails: StoreDetailsData;
     policies: PoliciesData;
-    newArrivals: Product[];
-    bestSellers: Product[];
     responseTone: ResponseToneData;
     languageSettings: LanguageSettingsData;
     responseSettings: ResponseSettingsData;
@@ -136,14 +133,6 @@ export default function AIPersonalityAndBehavior() {
         }
     );
 
-    const [newArrivals, setNewArrivals] = useState<Product[]>(() =>
-        loaderData.aiSettings?.newArrivals || []
-    );
-
-    const [bestSellers, setBestSellers] = useState<Product[]>(() =>
-        loaderData.aiSettings?.bestSellers || []
-    );
-
     const [responseTone, setResponseTone] = useState<ResponseToneData>(() =>
         loaderData.aiSettings?.responseTone || {
             selectedTone: ['professional'],
@@ -174,8 +163,6 @@ export default function AIPersonalityAndBehavior() {
                 recommendedProducts: recommentProducts,
                 storeDetails,
                 policies,
-                newArrivals,
-                bestSellers,
                 responseTone,
                 languageSettings,
                 responseSettings
@@ -198,8 +185,6 @@ export default function AIPersonalityAndBehavior() {
         recommentProducts,
         storeDetails,
         policies,
-        newArrivals,
-        bestSellers,
         responseTone,
         languageSettings,
         responseSettings,
@@ -286,14 +271,6 @@ export default function AIPersonalityAndBehavior() {
                 setData={setPolicies}
             />
 
-
-            {/* Custom Picks Component */}
-            <CustomPicks
-                newArrivals={newArrivals}
-                setNewArrivals={setNewArrivals}
-                bestSellers={bestSellers}
-                setBestSellers={setBestSellers}
-            />
 
             <ResponseTone data={responseTone} setData={setResponseTone} />
 

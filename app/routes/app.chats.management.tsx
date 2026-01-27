@@ -1,6 +1,9 @@
 import { useState, useMemo, useEffect, useRef } from "react";
+import { useLoaderData, LoaderFunctionArgs, useSearchParams } from "react-router";
 import { CallbackEvent } from "@shopify/polaris-types";
 import { formatDistanceToNow } from "date-fns";
+import { authenticate } from "app/shopify.server";
+import prisma from "app/db.server";
 
 // ============================================================================
 // TYPES
@@ -11,6 +14,14 @@ interface Message {
     content: string;
     role: "user" | "assistant" | "system";
     createdAt: Date;
+    products?: {
+        id?: string;
+        title?: string;
+        price?: number;
+        handle?: string;
+        image?: string;
+        score?: number;
+    }[];
 }
 
 interface ChatSession {
@@ -60,18 +71,118 @@ interface ChatInterfaceProps {
 }
 
 // ============================================================================
+// LOADER: Fetch customers, chat sessions, and messages from database
+// ============================================================================
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+    const { session } = await authenticate.admin(request);
+
+    if (!session?.shop) {
+        return { customers: [] as Customer[] };
+    }
+
+    try {
+        const chatSessions = await prisma.chatSession.findMany({
+            where: { shop: session.shop },
+            include: {
+                customer: true,
+                messages: {
+                    orderBy: { createdAt: "asc" }
+                }
+            },
+            orderBy: { createdAt: "desc" }
+        });
+
+        // Group sessions by customer (including guests)
+        const customersMap = new Map<string, Customer>();
+
+        for (const sessionRow of chatSessions) {
+            const isGuest = !sessionRow.customer;
+            const customerId = sessionRow.customer?.id ?? `guest-${sessionRow.id}`;
+
+            let customer = customersMap.get(customerId);
+
+            if (!customer) {
+                customer = {
+                    id: customerId,
+                    shopifyId: sessionRow.customer?.shopifyId ?? null,
+                    email: sessionRow.customer?.email ?? "guest",
+                    firstName: sessionRow.customer?.firstName ?? (isGuest ? "Guest" : null),
+                    lastName: sessionRow.customer?.lastName ?? null,
+                    phone: sessionRow.customer?.phone ?? null,
+                    source: sessionRow.customer?.source ?? (isGuest ? "WEBSITE" : "SHOPIFY"),
+                    createdAt: sessionRow.customer?.createdAt ?? sessionRow.createdAt,
+                    chats: []
+                };
+                customersMap.set(customerId, customer);
+            }
+
+            const chatSession: ChatSession = {
+                id: sessionRow.id,
+                customerId: sessionRow.customerId,
+                isGuest: sessionRow.isGuest,
+                createdAt: sessionRow.createdAt,
+                messages: sessionRow.messages.map(m => ({
+                    id: m.id,
+                    content: m.content,
+                    role: m.role as "user" | "assistant" | "system",
+                    createdAt: m.createdAt
+                }))
+            };
+
+            customer.chats.push(chatSession);
+        }
+
+        const customers = Array.from(customersMap.values());
+
+        return { customers };
+    } catch (error) {
+        console.error("[LOADER] Error fetching chats:", error);
+        return { customers: [] as Customer[] };
+    }
+};
+
+// ============================================================================
 // MAIN PAGE COMPONENT
 // ============================================================================
 
 export default function ChatsManagement() {
-    const [customers] = useState<Customer[]>(() => generateMockCustomers());
-    const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(customers[0]?.id || null);
+    const { customers: loaderCustomers } = useLoaderData<typeof loader>();
+    const [searchParams, setSearchParams] = useSearchParams();
+
+    // Normalize date fields to Date instances on the client
+    const [customers] = useState<Customer[]>(() =>
+        loaderCustomers.map(c => ({
+            ...c,
+            createdAt: new Date(c.createdAt as unknown as string),
+            chats: c.chats.map(s => ({
+                ...s,
+                createdAt: new Date(s.createdAt as unknown as string),
+                messages: s.messages.map(m => ({
+                    ...m,
+                    createdAt: new Date(m.createdAt as unknown as string)
+                }))
+            }))
+        }))
+    );
+
+    const initialCustomerIdFromUrl = searchParams.get("customerId");
+    const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(
+        initialCustomerIdFromUrl || customers[0]?.id || null
+    );
     const [searchQuery, setSearchQuery] = useState("");
     const [sourceFilter, setSourceFilter] = useState("");
     const [modeFilter, setModeFilter] = useState("");
     const [dateFilter, setDateFilter] = useState("all");
     const [aiEnabled, setAiEnabled] = useState(true);
     const [replyText, setReplyText] = useState("");
+
+    const handleSelectCustomer = (id: string) => {
+        setSelectedCustomerId(id);
+        const next = new URLSearchParams(searchParams);
+        next.set("customerId", id);
+        setSearchParams(next);
+    };
 
     const selectedCustomer = useMemo(
         () => customers.find((c) => c.id === selectedCustomerId),
@@ -130,7 +241,7 @@ export default function ChatsManagement() {
                 <CustomerSidebar
                     customers={filteredCustomers}
                     selectedCustomerId={selectedCustomerId}
-                    setSelectedCustomerId={setSelectedCustomerId}
+                    setSelectedCustomerId={handleSelectCustomer}
                     searchQuery={searchQuery}
                     setSearchQuery={setSearchQuery}
                     sourceFilter={sourceFilter}
@@ -238,7 +349,7 @@ export function CustomerSidebar({
                                         <s-box padding="base" background={customer.id === selectedCustomerId ? "transparent" : undefined} borderStyle="solid">
                                             <s-stack gap="small-200">
                                                 <s-grid gridTemplateColumns="1fr auto" alignItems="center">
-                                                    <s-heading><span style={{ fontSize: "15px" }}>{customer.firstName} {customer.lastName}</span></s-heading>
+                                                    <s-heading><span style={{ fontSize: "15px" }}>{customer.firstName ?? customer.email} {customer.lastName ?? ""}</span></s-heading>
                                                     <s-text tone="neutral">
                                                         <span style={{ fontSize: "10px" }}>{lastMsg ? formatDistanceToNow(lastMsg.createdAt, { addSuffix: true }) : ""}</span>
                                                     </s-text>
@@ -269,19 +380,59 @@ function ChatInterface({
     messages,
     aiEnabled,
     setAiEnabled,
-    replyText,
-    setReplyText,
-    handleAiSuggest,
-    // formatTime
 }: ChatInterfaceProps) {
     const scrollRef = useRef<HTMLDivElement>(null);
+    const lastMessageIdRef = useRef<string | null>(null);
+    const [visibleCount, setVisibleCount] = useState<number>(30);
+    const [isAtBottom, setIsAtBottom] = useState<boolean>(true);
     const primaryColor = "#B5EAEA";
 
+    // Reset visible messages when switching customer
     useEffect(() => {
-        if (scrollRef.current) {
-            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        const base = 30;
+        setVisibleCount(messages.length < base ? messages.length : base);
+        const last = messages[messages.length - 1]?.id ?? null;
+        lastMessageIdRef.current = last;
+    }, [customer?.id, messages]);
+
+    // Auto-scroll to bottom only when a new message arrives
+    useEffect(() => {
+        if (!isAtBottom) return;
+        const last = messages[messages.length - 1]?.id ?? null;
+        if (last !== lastMessageIdRef.current) {
+            lastMessageIdRef.current = last;
+            if (scrollRef.current) {
+                scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+            }
         }
-    }, [messages]);
+    }, [messages, isAtBottom]);
+
+    const handleScroll = () => {
+        if (!scrollRef.current) return;
+        const { scrollTop, clientHeight, scrollHeight } = scrollRef.current;
+        // Use a small threshold instead of strict 0 so loading reliably triggers
+        if (scrollTop <= 10 && visibleCount < messages.length) {
+            setVisibleCount(prev =>
+                Math.min(prev + 30, messages.length)
+            );
+        }
+
+        const threshold = 10;
+        const atBottom = scrollTop + clientHeight >= scrollHeight - threshold;
+        setIsAtBottom(atBottom);
+    };
+
+    const scrollToBottom = () => {
+        if (!scrollRef.current) return;
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        setIsAtBottom(true);
+    };
+
+    const visibleMessages = useMemo(() => {
+        if (messages.length <= visibleCount) return messages;
+        const start = messages.length - visibleCount;
+        return messages.slice(start);
+    }, [messages, visibleCount]);
 
     if (!customer) {
         return (
@@ -304,22 +455,88 @@ function ChatInterface({
                 </div>
             </div>
 
-            <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "20px", display: "flex", flexDirection: "column", backgroundColor: "#F9F7F7" }}>
-                {messages.map(msg => {
+            <div
+                ref={scrollRef}
+                style={{ overflowY: "auto", height: "75vh", padding: "20px", display: "flex", flexDirection: "column", backgroundColor: "#F9F7F7" }}
+                onScroll={handleScroll}
+            >
+                {visibleMessages.map(msg => {
                     const isUser = msg.role === "user";
                     return (
-                        <div key={msg.id} style={{
-                            alignSelf: isUser ? "flex-end" : "flex-start",
-                            backgroundColor: isUser ? "#EEEEEE" : primaryColor,
-                            color: isUser ? "#000" : "#000",
-                            padding: "5px 16px",
-                            borderRadius: isUser ? "1em 1em 0 1em" : "1em 1em 1em 0",
-                            marginBottom: "6px",
-                            maxWidth: "70%",
-                            boxShadow: "0 1px 2px rgba(0,0,0,0.1)"
-                        }}>
-                            <div>{msg.content}</div>
-                            <div style={{ fontSize: "8px", marginTop: "1px", opacity: 0.8, textAlign: isUser ? "right" : "left" }}>
+                        <div
+                            key={msg.id}
+                            style={{
+                                alignSelf: isUser ? "flex-end" : "flex-start",
+                                backgroundColor: isUser ? "#EEEEEE" : primaryColor,
+                                color: isUser ? "#000" : "#000",
+                                padding: "5px 16px",
+                                borderRadius: isUser ? "1em 1em 0 1em" : "1em 1em 1em 0",
+                                marginBottom: "6px",
+                                maxWidth: "70%",
+                                boxShadow: "0 1px 2px rgba(0,0,0,0.1)"
+                            }}
+                        >
+                            <div
+                                // Render AI/user content as HTML so bold text, line breaks,
+                                // and product lists from the chatbot display correctly.
+                                dangerouslySetInnerHTML={{
+                                    __html: msg.content.replace(/\n/g, "<br/>")
+                                }}
+                            />
+
+                            {!!msg.products?.length && (
+                                <div style={{ marginTop: "8px", display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                                    {msg.products.map(prod => (
+                                        <div
+                                            key={prod.id ?? prod.handle ?? prod.title}
+                                            style={{
+                                                width: "140px",
+                                                borderRadius: "10px",
+                                                border: "1px solid rgba(0,0,0,0.06)",
+                                                overflow: "hidden",
+                                                backgroundColor: "#FFFFFF",
+                                                boxShadow: "0 1px 3px rgba(0,0,0,0.08)"
+                                            }}
+                                        >
+                                            {prod.image && (
+                                                <div style={{ width: "100%", height: "90px", overflow: "hidden" }}>
+                                                    <img
+                                                        src={prod.image}
+                                                        alt={prod.title || ""}
+                                                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                                                    />
+                                                </div>
+                                            )}
+                                            <div style={{ padding: "6px 8px" }}>
+                                                <div
+                                                    style={{
+                                                        fontSize: "11px",
+                                                        fontWeight: 600,
+                                                        marginBottom: "2px",
+                                                        overflow: "hidden",
+                                                        textOverflow: "ellipsis",
+                                                        whiteSpace: "nowrap"
+                                                    }}
+                                                >
+                                                    {prod.title}
+                                                </div>
+                                                <div style={{ fontSize: "11px", color: "#444" }}>
+                                                    {typeof prod.price === "number" ? `$${prod.price}` : ""}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            <div
+                                style={{
+                                    fontSize: "8px",
+                                    marginTop: "1px",
+                                    opacity: 0.8,
+                                    textAlign: isUser ? "right" : "left"
+                                }}
+                            >
                                 {formatDistanceToNow(msg.createdAt, { addSuffix: true })}
                             </div>
                         </div>
@@ -327,7 +544,15 @@ function ChatInterface({
                 })}
             </div>
 
-            <div style={{ padding: "10px 14px", borderTop: `2px solid ${primaryColor}`, background: "#EEEEEE" }}>
+            {!isAtBottom && messages.length > 0 && (
+                <div style={{ textAlign: "center", padding: "4px 0" }}>
+                    <s-button variant="tertiary" onClick={scrollToBottom}>
+                        Go to latest message
+                    </s-button>
+                </div>
+            )}
+
+            {/* <div style={{ padding: "10px 14px", borderTop: `2px solid ${primaryColor}`, background: "#EEEEEE" }}>
                 <textarea
                     rows={3}
                     placeholder="Type your message..."
@@ -343,48 +568,7 @@ function ChatInterface({
                         <s-button variant="primary" onClick={() => setReplyText("")} disabled={!replyText.trim()}>Send</s-button>
                     </div>
                 </div>
-            </div>
+            </div> */}
         </div>
     );
 }
-
-// ============================================================================
-// MOCK DATA GENERATOR
-// ============================================================================
-
-const generateMockCustomers = (): Customer[] => {
-    const customers: Customer[] = [];
-    const sources = ["SHOPIFY", "WEBSITE", "MANUAL"];
-    const firstNames = ["John", "Sarah", "Michael", "Emily", "David", "Jessica"];
-    const lastNames = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia"];
-
-    for (let i = 0; i < 15; i++) {
-        const firstName = firstNames[i % firstNames.length];
-        const lastName = lastNames[i % lastNames.length];
-        const email = `${firstName.toLowerCase()}.${lastName.toLowerCase()}${i}@example.com`;
-
-        customers.push({
-            id: `customer-${i}`,
-            shopifyId: `gid://shopify/Customer/${1000 + i}`,
-            email,
-            firstName,
-            lastName,
-            phone: `+1-555-010${i}`,
-            source: sources[i % sources.length],
-            createdAt: new Date(),
-            chats: [{
-                id: `session-${i}`,
-                customerId: `customer-${i}`,
-                isGuest: false,
-                createdAt: new Date(),
-                messages: [
-                    { id: `msg-${i}-1`, content: "I'm looking for an update on my order.", role: "user", createdAt: new Date(Date.now() - 3600000) },
-                    { id: `msg-${i}-2`, content: "I'd be happy to help with that!", role: "assistant", createdAt: new Date(Date.now() - 1800000) },
-                    { id: `msg-${i}-3`, content: "I'd be happy to help with that, I'd be happy to help with that, I'd be happy to help with that", role: "user", createdAt: new Date(Date.now() - 1800000) },
-                    { id: `msg-${i}-4`, content: "I'd be happy to help with that!", role: "assistant", createdAt: new Date(Date.now() - 1800000) }
-                ]
-            }],
-        });
-    }
-    return customers;
-};

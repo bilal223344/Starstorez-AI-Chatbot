@@ -727,9 +727,24 @@ async function getOrCreateSession(
 
     // Step 2: Create or find customer if email provided
     if (customerEmail) {
-        const customer = await prisma.customer.upsert({
-            where: { email: customerEmail },
-            create: { email: customerEmail, source: "WEBSITE" },
+        const customer = await (prisma.customer as unknown as {
+            upsert: (args: {
+                where: { shop_email: { shop: string; email: string } };
+                create: { shop: string; email: string; source: string };
+                update: Record<string, never>;
+            }) => Promise<{ id: string }>;
+        }).upsert({
+            where: {
+                shop_email: {
+                    shop,
+                    email: customerEmail
+                }
+            },
+            create: {
+                shop,
+                email: customerEmail,
+                source: "WEBSITE"
+            },
             update: {}
         });
         customerId = customer.id;

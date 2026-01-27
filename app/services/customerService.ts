@@ -1,4 +1,4 @@
-import { PrismaClient, Prisma } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { ShopifyCustomerNode, ShopifyCustomersResponse, ShopifyGraphqlResponse } from 'app/types';
 import { shopifyGraphqlRequest, sleep } from 'app/utils/extra';
 const prisma = new PrismaClient();
@@ -39,7 +39,7 @@ export const syncAllCustomers = async (shop: string, accessToken: string) => {
 
         // Save batch to DB
         await Promise.all(nodes.map(async (node: ShopifyCustomerNode) => {
-            await saveCustomerToDB(formatShopifyCustomer(node));
+            await saveCustomerToDB(formatShopifyCustomer(shop, node));
         }));
 
         count += nodes.length;
@@ -69,15 +69,29 @@ export const syncCustomerById = async (shop: string, accessToken: string, custom
     const customer = response.data?.customer;
 
     if (customer) {
-        await saveCustomerToDB(formatShopifyCustomer(customer));
+        await saveCustomerToDB(formatShopifyCustomer(shop, customer));
         console.log(`[SYNC] Customer ${customer.email} synced to DB.`);
     }
 };
 
 // --- Formatter ---
-export const formatShopifyCustomer = (node: ShopifyCustomerNode): Prisma.CustomerCreateInput => {
+export const formatShopifyCustomer = (
+    shop: string,
+    node: ShopifyCustomerNode
+): {
+    shopifyId: string;
+    shop: string;
+    email: string | null;
+    firstName: string | null;
+    lastName: string | null;
+    phone: string | null;
+    source: string;
+    createdAt: Date;
+    updatedAt: Date;
+} => {
     return {
         shopifyId: node.id,
+        shop,
         email: node.email,
         firstName: node.firstName,
         lastName: node.lastName,
@@ -89,15 +103,47 @@ export const formatShopifyCustomer = (node: ShopifyCustomerNode): Prisma.Custome
 };
 
 // --- DB Actions ---
-export const saveCustomerToDB = async (data: Prisma.CustomerCreateInput) => {
+export const saveCustomerToDB = async (data: {
+    shopifyId: string;
+    shop: string;
+    email: string | null;
+    firstName: string | null;
+    lastName: string | null;
+    phone: string | null;
+    source: string;
+    createdAt: Date;
+    updatedAt: Date;
+}) => {
     try {
         console.log("[SAVE CUSTOMER DB]");
 
         // Upsert ensures we Create if new, Update if exists
-        return await prisma.customer.upsert({
-            where: { shopifyId: data.shopifyId! }, // We know it exists coming from Shopify
+        // One email can exist in multiple shops, but must be unique per shop.
+        // We upsert on the composite (shop, email) key so that:
+        // - test@gmail.com in shop A is independent of test@gmail.com in shop B
+        // - we don't create duplicates for the same email+shop pair.
+        return await (prisma.customer as unknown as {
+            upsert: (args: {
+                where: { shop_email: { shop: string; email: string | null } };
+                create: typeof data;
+                update: Partial<typeof data>;
+            }) => Promise<unknown>;
+        }).upsert({
+            where: {
+                shop_email: {
+                    shop: data.shop,
+                    email: data.email,
+                },
+            },
             create: data,
-            update: data,
+            update: {
+                firstName: data.firstName,
+                lastName: data.lastName,
+                phone: data.phone,
+                source: data.source,
+                shopifyId: data.shopifyId,
+                updatedAt: data.updatedAt,
+            },
         });
     } catch (error) {
         console.error(`[DB Error] Customer Sync Failed:`, error);
