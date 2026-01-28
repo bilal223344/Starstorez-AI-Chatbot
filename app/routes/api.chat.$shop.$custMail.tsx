@@ -1,9 +1,17 @@
-import { ActionFunctionArgs } from "react-router";
+import { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import prisma from "app/db.server";
 import { OpenAI } from "openai";
 import { generateEmbeddings } from "app/services/pineconeService";
 import { AISettingsState } from "./app.personality";
-import { LoaderFunctionArgs } from "react-router";
+
+// WebSocket support: we accept either browser WebSocket or `ws` (Node) sockets.
+// In this route file, keep it as `any` so we can call `on(...)` (ws) or
+// `addEventListener(...)` (browser) without TS blocking builds.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type WebSocketType = any;
+
+// Store active WebSocket connections
+const wsClients = new Map<string, WebSocketType>();
 
 // ============================================================================
 // 1. TYPES & INTERFACES
@@ -23,8 +31,19 @@ interface PineconeMatch {
     vendor?: string;
     tags?: string[] | string;
     description?: string;
-    [key: string]: any;
+    [key: string]: string | number | string[] | undefined;
   };
+}
+
+// Simplified product shape used in chat responses & persistence
+interface ChatProduct {
+  id: string;
+  title: string;
+  price: number;
+  handle: string;
+  image: string;
+  score: number;
+  description?: string;
 }
 
 // ============================================================================
@@ -45,87 +64,537 @@ interface ChatResult {
   responseType: "AI" | "KEYWORD" | "MANUAL_HANDOFF";
   userMessage: { role: "user"; content: string };
   assistantMessage: { role: "assistant"; content: string };
-  products?: PineconeMatch[];
+  products?: ChatProduct[];
   performance?: { responseTime: number; productsFound: number };
   error?: string;
 }
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
+  const startTime = Date.now();
+  
   try {
     // Step 1: Extract parameters
     const { shop, custMail } = params;
-    console.log("shop", shop);
-    console.log("custMail", custMail);
-    // Step 2: Validate shop parameter
+    const url = new URL(request.url);
+
+    // Query params:
+    //   - mode: "paginated" (default) | "all" | "analyze"
+    //   - limit: how many messages to fetch (default 20, max 50) - for paginated mode
+    //   - before: ISO timestamp; only messages older than this are returned - for paginated mode
+    //   - startDate: ISO date string - for analyze mode
+    //   - endDate: ISO date string - for analyze mode
+    const mode = url.searchParams.get("mode") || "paginated";
+    const limitParam = url.searchParams.get("limit");
+    const beforeParam = url.searchParams.get("before");
+    const startDateParam = url.searchParams.get("startDate");
+    const endDateParam = url.searchParams.get("endDate");
+    
+    const limitRaw = limitParam ? parseInt(limitParam, 10) : 20;
+    const limit = Number.isNaN(limitRaw) ? 20 : Math.min(Math.max(limitRaw, 1), 50);
+    const beforeDate = beforeParam ? new Date(beforeParam) : new Date();
+
+
+    // Step 2: Validate required route params
     if (!shop) {
-      return { error: "Shop parameter is required" };
+      return Response.json(
+        { error: "Shop parameter is required" },
+        { status: 400 },
+      );
     }
     if (!custMail) {
-      return { error: "Customer email is required" };
+      console.log("[LOADER] ❌ Validation failed: Customer email missing");
+      return Response.json(
+        { error: "Customer email is required" },
+        { status: 400 },
+      );
     }
 
-    // Step 4: Resolve customer ID if email provided
+    // Step 3: Find customer (DO NOT CREATE - only GET if exists)
     let customerId: string | null = null;
-    if (custMail && custMail !== "guest") {
-      const customer = await prisma.customer.findUnique({
-        where: { shop_email: { shop: shop, email: custMail } },
-      });
-      customerId = customer?.id || null;
-    }
-    console.log("customerId", customerId);
-    // Step 5: Fetch chat session
-    let chatSession = null;
-
-    if (customerId) {
-      // Try to find session by ID
-      chatSession = await prisma.chatSession.findFirst({
-        where: { customerId: customerId, shop: shop },
-        include: {
-          messages: { orderBy: { createdAt: "asc" } },
-          customer: true,
+    let customer = null;
+    
+    if (custMail && custMail !== "guest") {      
+      customer = await prisma.customer.findUnique({
+        where: { shop_email: { shop, email: custMail } },
+        select: {
+          id: true,
+          shopifyId: true,
+          shop: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          phone: true,
+          source: true,
+          createdAt: true,
+          updatedAt: true,
         },
       });
-
-      // Verify session belongs to this shop (security check)
-      if (chatSession && chatSession.shop !== shop) {
-        return { error: "Invalid session" };
+      
+      // If customer not found, return empty response
+      if (!customer) {
+        return Response.json({
+          session: null,
+          messages: [],
+          customer: null,
+          paging: { hasMore: false, nextBefore: null },
+          error: "User not found",
+        });
       }
-    } 
-
-    // Step 6: Return session data or empty response
-    if (!chatSession) {
-      return {
-        session: null,
-        messages: [],
-        customer: null,
-      };
+      
+      customerId = customer.id;
     }
 
-    return {
-      session: {
-        id: chatSession.id,
-        shop: chatSession.shop,
-        customerId: chatSession.customerId,
-        isGuest: chatSession.isGuest,
-      },
-      messages: chatSession.messages.map((m) => ({
-        id: m.id,
-        role: m.role,
-        content: m.content,
-        createdAt: m.createdAt,
-      })),
-      customer: chatSession.customer,
-    };
+    // Step 4: Handle different modes
+    if (mode === "analyze" || mode === "all") {
+      
+      // Return ALL sessions with full analysis
+      const where: { shop: string; customerId?: string; createdAt?: { gte?: Date; lte?: Date } } = { shop };
+      if (customerId) {
+        where.customerId = customerId;
+      }
+      if (startDateParam || endDateParam) {
+        where.createdAt = {};
+        if (startDateParam) where.createdAt.gte = new Date(startDateParam);
+        if (endDateParam) where.createdAt.lte = new Date(endDateParam);
+      }
+
+      const chatSessions = await prisma.chatSession.findMany({
+        where,
+        include: {
+          customer: true,
+          messages: {
+            orderBy: { createdAt: "asc" },
+            include: {
+              recommendedProducts: true,
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+
+      // Calculate statistics
+      const totalSessions = chatSessions.length;
+      const totalMessages = chatSessions.reduce(
+        (sum, session) => sum + session.messages.length,
+        0
+      );
+      const userMessages = chatSessions.reduce(
+        (sum, session) =>
+          sum + session.messages.filter((m) => m.role === "user").length,
+        0
+      );
+      const assistantMessages = chatSessions.reduce(
+        (sum, session) =>
+          sum + session.messages.filter((m) => m.role === "assistant").length,
+        0
+      );
+      const totalProductsRecommended = chatSessions.reduce(
+        (sum, session) =>
+          sum +
+          session.messages.reduce(
+            (msgSum, msg) => msgSum + msg.recommendedProducts.length,
+            0
+          ),
+        0
+      );
+
+      const formattedSessions = chatSessions.map((session) => ({
+        id: session.id,
+        shop: session.shop,
+        customerId: session.customerId,
+        isGuest: session.isGuest,
+        createdAt: session.createdAt,
+        customer: session.customer
+          ? {
+              id: session.customer.id,
+              email: session.customer.email,
+              firstName: session.customer.firstName,
+              lastName: session.customer.lastName,
+              phone: session.customer.phone,
+              source: session.customer.source,
+            }
+          : null,
+        messages: session.messages.map((msg) => ({
+          id: msg.id,
+          role: msg.role,
+          content: msg.content,
+          createdAt: msg.createdAt,
+          products:
+            msg.role === "assistant" && msg.recommendedProducts.length > 0
+              ? msg.recommendedProducts.map((p) => ({
+                  id: p.productProdId,
+                  title: p.title,
+                  price: p.price,
+                  handle: p.handle || null,
+                  image: p.image || null,
+                  score: p.score || null,
+                }))
+              : undefined,
+        })),
+        messageCount: session.messages.length,
+        productRecommendations: session.messages.reduce(
+          (sum, msg) => sum + msg.recommendedProducts.length,
+          0
+        ),
+      }));
+
+      if (mode === "analyze") { 
+        return Response.json({
+          success: true,
+          shop,
+          mode: "analyze",
+          customer: customer
+            ? {
+                id: customer.id,
+                email: customer.email,
+                firstName: customer.firstName,
+                lastName: customer.lastName,
+                phone: customer.phone,
+                source: customer.source,
+              }
+            : null,
+          statistics: {
+            totalSessions,
+            totalMessages,
+            userMessages,
+            assistantMessages,
+            totalProductsRecommended,
+            averageMessagesPerSession:
+              totalSessions > 0
+                ? parseFloat((totalMessages / totalSessions).toFixed(2))
+                : 0,
+            averageProductsPerSession:
+              totalSessions > 0
+                ? parseFloat(
+                    (totalProductsRecommended / totalSessions).toFixed(2)
+                  )
+                : 0,
+          },
+          sessions: formattedSessions,
+          filters: {
+            startDate: startDateParam || null,
+            endDate: endDateParam || null,
+          },
+        });
+      } else {
+        
+        return Response.json({
+          success: true,
+          shop,
+          mode: "all",
+          customer: customer
+            ? {
+                id: customer.id,
+                email: customer.email,
+                firstName: customer.firstName,
+                lastName: customer.lastName,
+                phone: customer.phone,
+                source: customer.source,
+              }
+            : null,
+          summary: {
+            totalSessions,
+            totalMessages,
+            totalProductsRecommended: totalProductsRecommended,
+          },
+          sessions: formattedSessions,
+        });
+      }
+    }
+
+    
+    // Aggregate messages from ALL sessions for this customer
+    if (customerId) {
+      // Get ALL sessions for this customer
+      const allSessions = await prisma.chatSession.findMany({
+        where: { customerId: customerId, shop: shop },
+        include: {
+          messages: {
+            where: { createdAt: { lt: beforeDate } },
+            orderBy: { createdAt: "desc" },
+            include: {
+              recommendedProducts: true,
+            },
+          },
+          customer: true,
+        },
+        orderBy: { createdAt: "desc" },
+      });
+
+
+      if (allSessions.length === 0) {
+        return Response.json({
+          session: null,
+          messages: [],
+          customer: customer,
+          paging: { hasMore: false, nextBefore: null },
+        });
+      }
+
+      // Aggregate all messages from all sessions, sorted by createdAt (newest first)
+      const allMessages = allSessions
+        .flatMap((session) =>
+          session.messages.map((msg) => ({
+            ...msg,
+            sessionId: session.id,
+          }))
+        )
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+      // Take only the requested limit
+      const paginatedMessages = allMessages.slice(0, limit);
+
+      // Get the latest session for session metadata
+      const latestSession = allSessions[0];
+
+      // Reverse to show oldest first (for display)
+      const messagesAsc = [...paginatedMessages].reverse();
+
+      return Response.json({
+        session: {
+          id: latestSession.id,
+          shop: latestSession.shop,
+          customerId: latestSession.customerId,
+          isGuest: latestSession.isGuest,
+        },
+        messages: messagesAsc.map((m) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          createdAt: m.createdAt,
+          products:
+            m.role === "assistant" && m.recommendedProducts.length > 0
+              ? m.recommendedProducts.map((p) => ({
+                  id: p.productProdId,
+                  title: p.title,
+                  price: p.price,
+                  handle: p.handle || "",
+                  image: p.image || "",
+                  score: p.score || undefined,
+                }))
+              : undefined,
+        })),
+        customer: latestSession.customer || customer,
+        paging: {
+          hasMore: allMessages.length > limit,
+          nextBefore:
+            paginatedMessages.length > 0
+              ? paginatedMessages[paginatedMessages.length - 1].createdAt.toISOString()
+              : null,
+        },
+      });
+    }
+    
+    return Response.json({
+      session: null,
+      messages: [],
+      customer: customer,
+      paging: { hasMore: false, nextBefore: null },
+    });
   } catch (error) {
-    console.error("[LOADER] Error fetching chat history:", error);
-    return { error: "Failed to fetch chat history" };
+    const responseTime = Date.now() - startTime;
+    console.error("[LOADER] ❌ Error fetching chat history:", error);
+    console.error("[LOADER] Error details:", {
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      responseTime,
+    });
+    console.log("[LOADER] ===== Chat Loader Failed =====");
+    
+    return Response.json(
+      { error: "Failed to fetch chat history" },
+      { status: 500 },
+    );
   }
 };
+
+// ============================================================================
+// WebSocket Message Handler (can be called from WebSocket server)
+// ============================================================================
+export async function handleWebSocketMessage(
+  shop: string,
+  custMail: string,
+  message: string,
+  ws?: WebSocketType
+): Promise<ChatResult> {
+  console.log("[WS Action] Processing WebSocket message:", { shop, custMail, message });
+  
+  try {
+    if (!shop || !custMail) {
+      const error = {
+        success: false,
+        error: "INVALID_ROUTE_PARAMS",
+        errorMessage: "Both 'shop' and 'custMail' are required.",
+      };
+      
+      if (ws && typeof ws.send === "function") {
+        try {
+          ws.send(JSON.stringify(error));
+        } catch (e) {
+          console.error("[WS Action] Error sending error response:", e);
+        }
+      }
+      return error as unknown as ChatResult;
+    }
+
+    if (!message || typeof message !== "string") {
+      const error = {
+        success: false,
+        error: "INVALID_REQUEST",
+        errorMessage: "Missing or invalid 'message' field.",
+      };
+      
+      if (ws && typeof ws.send === "function") {
+        try {
+          ws.send(JSON.stringify(error));
+        } catch (e) {
+          console.error("[WS Action] Error sending error response:", e);
+        }
+      }
+      return error as unknown as ChatResult;
+    }
+
+    // Use the same processChat logic
+    const result = await processChat(shop, custMail, message);
+
+    // Send response via WebSocket if connection provided
+    if (ws && typeof ws.send === "function") {
+      try {
+        // Check if WebSocket is open (readyState === 1 for OPEN)
+        const isOpen = ws.readyState === undefined || ws.readyState === 1;
+        if (isOpen) {
+          ws.send(JSON.stringify(result));
+          console.log("[WS Action] Response sent via WebSocket");
+        }
+      } catch (e) {
+        console.error("[WS Action] Error sending WebSocket response:", e);
+      }
+    }
+
+    return result;
+  } catch (error: unknown) {
+    console.error("[WS Action Error]:", error instanceof Error ? error.message : String(error));
+    const errorResponse = {
+      success: false,
+      error: "SYSTEM_ERROR",
+      errorMessage: error instanceof Error ? error.message : String(error),
+    };
+    
+    if (ws && typeof ws.send === "function") {
+      try {
+        const isOpen = ws.readyState === undefined || ws.readyState === 1;
+        if (isOpen) {
+          ws.send(JSON.stringify(errorResponse));
+        }
+      } catch (e) {
+        console.error("[WS Action] Error sending error response:", e);
+      }
+    }
+    
+    return errorResponse as unknown as ChatResult;
+  }
+}
+
+// ============================================================================
+// Broadcast message to all WebSocket clients for a shop/customer
+// ============================================================================
+export function broadcastToWebSocketClients(
+  shop: string,
+  custMail: string,
+  data: unknown
+): void {
+  const clientKey = `${shop}:${custMail}`;
+  const message = JSON.stringify(data);
+  let sentCount = 0;
+  
+  wsClients.forEach((ws, key) => {
+    if (key === clientKey && ws && typeof ws.send === "function") {
+      try {
+        const isOpen = ws.readyState === undefined || ws.readyState === 1;
+        if (isOpen) {
+          ws.send(message);
+          sentCount++;
+          console.log("[WS Broadcast] Sent to client:", clientKey);
+        } else {
+          // Remove closed connections
+          wsClients.delete(key);
+        }
+      } catch (error) {
+        console.error("[WS Broadcast] Error sending to client:", error);
+        wsClients.delete(key);
+      }
+    }
+  });
+  
+  if (sentCount > 0) {
+    console.log("[WS Broadcast] Broadcasted to", sentCount, "client(s) for", clientKey);
+  }
+}
+
+// ============================================================================
+// Register WebSocket client
+// ============================================================================
+export function registerWebSocketClient(
+  shop: string,
+  custMail: string,
+  ws: WebSocketType
+): void {
+  const clientKey = `${shop}:${custMail}`;
+  wsClients.set(clientKey, ws);
+  console.log("[WS Register] Client registered:", clientKey, "Total clients:", wsClients.size);
+  
+  // Clean up on close/error (supports both browser WebSocket and `ws` package)
+  if (ws && typeof ws.on === "function") {
+    // `ws` package (Node)
+    ws.on("close", () => {
+      wsClients.delete(clientKey);
+    });
+    ws.on("error", (error: unknown) => {
+      console.error("[WS Register] Client error:", clientKey, error);
+      wsClients.delete(clientKey);
+    });
+  } else if (ws && typeof ws.addEventListener === "function") {
+    // Browser WebSocket
+    ws.addEventListener("close", () => {
+      wsClients.delete(clientKey);
+    });
+    ws.addEventListener("error", (error: unknown) => {
+      console.error("[WS Register] Client error:", clientKey, error);
+      wsClients.delete(clientKey);
+    });
+  }
+}
+
+// ============================================================================
+// Get WebSocket client count for a shop/customer
+// ============================================================================
+export function getWebSocketClientCount(shop: string, custMail: string): number {
+  const clientKey = `${shop}:${custMail}`;
+  return wsClients.has(clientKey) ? 1 : 0;
+}
 
 // React-Router Action – handles HTTP POST /api/chat/:shop/:custMail
 export const action = async ({ request, params }: ActionFunctionArgs) => {
   try {
     const { shop, custMail } = params;
+
+    // Check if this is a WebSocket upgrade request
+    const upgradeHeader = request.headers.get("upgrade");
+    const connectionHeader = request.headers.get("connection");
+    
+    if (upgradeHeader?.toLowerCase() === "websocket" || 
+        connectionHeader?.toLowerCase().includes("upgrade")) {
+      console.log("[Action] WebSocket upgrade detected - should be handled by WebSocket server");
+      // WebSocket upgrades should be handled by a separate WebSocket server
+      // Return 426 Upgrade Required to indicate WebSocket support
+      return new Response("WebSocket upgrade required. Connect to ws://host/ws/chat", {
+        status: 426,
+        headers: {
+          "Upgrade": "websocket",
+          "Connection": "Upgrade",
+        },
+      });
+    }
 
     // Parse JSON body from client: { "message": "..." }
     let body: any = null;
@@ -168,19 +637,26 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       );
     }
 
+    console.log("[Action] Processing HTTP POST message:", { shop, custMail });
+
     // Delegate to shared chat logic (also used by WebSocket server)
     const result = await processChat(shop, custMail, userMessageContent);
+
+    // Broadcast to WebSocket clients if any are connected
+    if (result.success) {
+      broadcastToWebSocketClients(shop, custMail, result);
+    }
 
     return Response.json(result, {
       status: result.success ? 200 : 500,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("[HTTP Action Error]:", error);
     return Response.json(
       {
         success: false,
         error: "SYSTEM_ERROR",
-        errorMessage: error?.message ?? "Unknown error",
+        errorMessage: error instanceof Error ? error.message : String(error),
       },
       { status: 500 },
     );
@@ -200,10 +676,19 @@ export async function processChat(
     const cleanShop = shop;
 
     // --- A. LOAD CONTEXT ---
-    const customer = await prisma.customer.findUnique({
-      where: { shop_email: { shop: cleanShop, email: custMail } },
-    });
-    const customerId = customer?.id;
+    let customerId: string | null = null;
+    if (custMail && custMail !== "guest") {
+      const customer = await prisma.customer.upsert({
+        where: { shop_email: { shop: cleanShop, email: custMail } },
+        update: {},
+        create: {
+          shop: cleanShop,
+          email: custMail,
+          // Other fields (firstName, lastName, etc.) can be populated later
+        },
+      });
+      customerId = customer.id;
+    }
 
     const aiSettingsRecord = await prisma.aISettings.findUnique({
       where: { shop: cleanShop },
@@ -282,15 +767,16 @@ export async function processChat(
 
     const choice = firstResponse.choices[0].message;
     let finalAiText = choice.content || "";
-    let rawProducts: any[] = [];
+    let rawProducts: ChatProduct[] = [];
 
     // --- E. TOOL EXECUTION ---
     if (choice.tool_calls) {
       messages.push(choice);
 
       for (const toolCall of choice.tool_calls) {
-        if (toolCall.function.name === "recommend_products") {
-          const args = JSON.parse(toolCall.function.arguments);
+        const fn = (toolCall as any).function;
+        if (fn?.name === "recommend_products") {
+          const args = JSON.parse(fn.arguments);
           console.log(`[AI-Core] Searching: "${args.search_query}"`);
 
           const matches = await searchPinecone(
@@ -301,15 +787,21 @@ export async function processChat(
             args.sort,
           );
 
-          rawProducts = matches.map((m) => ({
-            id: m.metadata.product_id,
-            title: m.metadata.title,
-            price:
-              parseFloat(String(m.metadata.price).replace(/[^0-9.]/g, "")) || 0,
-            handle: m.metadata.handle,
-            image: m.metadata.image || "",
-            score: m.score,
-          }));
+          rawProducts = matches
+            .filter((m) => m.metadata && m.metadata.title)
+            .map((m) => ({
+              id: String(m.metadata.product_id),
+              title: String(m.metadata.title),
+              price:
+                parseFloat(String(m.metadata.price).replace(/[^0-9.]/g, "")) ||
+                0,
+              handle: String(m.metadata.handle || ""),
+              image: String(m.metadata.image || ""),
+              score: m.score,
+              description: m.metadata.description
+                ? String(m.metadata.description)
+                : undefined,
+            }));
 
           const toolResultText = formatProductsForAI(rawProducts); // Using local helper logic
           messages.push({
@@ -330,12 +822,33 @@ export async function processChat(
 
     // --- F. SAVE & RETURN ---
     if (sessionId) {
-      await prisma.message.createMany({
-        data: [
-          { sessionId, role: "user", content: userMessageContent },
-          { sessionId, role: "assistant", content: finalAiText },
-        ],
-      });
+      console.log("sessionId", sessionId);
+      console.log("finalAiText", finalAiText);
+      console.log("rawProducts", rawProducts);
+      // 1. Save user and assistant messages and get assistant message ID back
+      const [, assistantMessage] = await prisma.$transaction([
+        prisma.message.create({
+          data: { sessionId, role: "user", content: userMessageContent },
+        }),
+        prisma.message.create({
+          data: { sessionId, role: "assistant", content: finalAiText },
+        }),
+      ]);
+
+      // 2. Persist any products recommended by the AI for this assistant message
+      if (rawProducts.length > 0) {
+        await prisma.messageProduct.createMany({
+          data: rawProducts.map((p) => ({
+            messageId: assistantMessage.id,
+            productProdId: String(p.id),
+            title: p.title,
+            price: typeof p.price === "number" ? p.price : parseFloat(String(p.price)) || 0,
+            handle: p.handle || null,
+            image: p.image || null,
+            score: typeof p.score === "number" ? p.score : null,
+          })),
+        });
+      }
     }
 
     return {
@@ -350,13 +863,13 @@ export async function processChat(
         productsFound: rawProducts.length,
       },
     };
-  } catch (error: any) {
-    console.error("[Core Logic Error]:", error);
+  } catch (error: unknown) {
+    console.error("[Core Logic Error]:", error instanceof Error ? error.message : String(error));
     return {
       success: false,
       error: "SYSTEM_ERROR",
-      errorMessage: error.message,
-    };
+      errorMessage: error instanceof Error ? error.message : String(error),
+    } as unknown as ChatResult;
   }
 }
 
@@ -417,21 +930,27 @@ async function searchPinecone(
     const hasPriceFilter = minPrice !== undefined || maxPrice !== undefined;
 
     matches = matches.filter((m) => {
-      const combinedText =
-        `${m.metadata.title} ${m.metadata.product_type} ${m.metadata.tags || ""}`.toLowerCase();
+      // Guard against results without metadata
+      if (!m.metadata) return false;
+
+      const title = String(m.metadata.title || "");
+      const productType = String(m.metadata.product_type || "");
+      const tagsValue = Array.isArray(m.metadata.tags)
+        ? m.metadata.tags.join(" ")
+        : String(m.metadata.tags || "");
+
+      const combinedText = `${title} ${productType} ${tagsValue}`.toLowerCase();
 
       // A. EXACT NAME BOOST
-      if (
-        m.metadata.title &&
-        m.metadata.title.toLowerCase().includes(lowerQuery)
-      ) {
+      if (title && title.toLowerCase().includes(lowerQuery)) {
         m.score = 0.99;
         return true;
       }
 
       // B. PRICE FILTERING
       const priceVal =
-        parseFloat(String(m.metadata.price).replace(/[^0-9.]/g, "")) || 0;
+        parseFloat(String(m.metadata.price ?? "").replace(/[^0-9.]/g, "")) ||
+        0;
       if (minPrice !== undefined && priceVal < minPrice) return false;
       if (maxPrice !== undefined && priceVal > maxPrice) return false;
 
@@ -483,18 +1002,18 @@ function getPrice(m: PineconeMatch): number {
   return parseFloat(String(m.metadata.price).replace(/[^0-9.]/g, "")) || 0;
 }
 
-function formatProductsForAI(products: PineconeMatch[]): string {
+function formatProductsForAI(products: ChatProduct[]): string {
   if (products.length === 0)
     return "Result: No matching products found in inventory. Please apologize to the user.";
 
   return products
     .map((p) => {
-      const title = p.metadata.title;
-      const price = p.metadata.price;
-      const desc = p.metadata.description
-        ? p.metadata.description.substring(0, 300) + "..."
+      const title = p.title;
+      const price = p.price;
+      const desc = p.description
+        ? p.description.substring(0, 300) + "..."
         : "No detailed description available.";
-      const link = `/products/${p.metadata.handle}`;
+      const link = `/products/${p.handle}`;
       return `PRODUCT: ${title}\nPRICE: ${price}\nLINK: ${link}\nDETAILS: ${desc}\n---`;
     })
     .join("\n");
@@ -544,8 +1063,9 @@ function buildSystemPrompt(aiSettings: AISettingsState): string {
   return `
     You are an expert sales assistant for "${storeDetails.about || "our online store"}".
     
-    [LANGUAGE & COMMUNICATION]
+    [LANGUAGE & COMMUNICATION] : """
     ${languageRule}
+    """
 
     [MISSION BOUNDARIES]
     1. **STRICTLY E-COMMERCE:** You are here to sell products and help with orders.
@@ -568,8 +1088,9 @@ function buildSystemPrompt(aiSettings: AISettingsState): string {
     - If user asks "How much is it?", look at the last product mentioned in history. Answer immediately.
     - If user says "Show me the cheapest one", look at the list you just showed them.
 
-    [POLICIES DATA]
+    [POLICIES DATA]: """
     ${policyText}
+	"""
 
     ${customInstructions}
 
@@ -577,26 +1098,4 @@ function buildSystemPrompt(aiSettings: AISettingsState): string {
     `;
 }
 
-// Basic Data Fetchers
-function handleShop(shop: string) {
-  if (!shop) throw new Error("Shop required");
-  return shop;
-}
-async function handleMessage(r: Request) {
-  const b = await r.json();
-  return b.message;
-}
-async function handleCustomer(m: string, s: string) {
-  if (!m) return undefined;
-  const c = await prisma.customer.findUnique({
-    where: { shop_email: { shop: s, email: m } },
-  });
-  return c?.id;
-}
-async function handleAISettings(s: string) {
-  return await prisma.aISettings.findUnique({ where: { shop: s } });
-}
-async function getRemainingCredits(s: string) {
-  const c = await prisma.merchantCredits.findUnique({ where: { shop: s } });
-  return c ? c.totalCredits - c.usedCredits : 0;
-}
+// (removed unused helper functions)

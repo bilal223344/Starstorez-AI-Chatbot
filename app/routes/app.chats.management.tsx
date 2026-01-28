@@ -87,7 +87,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             include: {
                 customer: true,
                 messages: {
-                    orderBy: { createdAt: "asc" }
+                    orderBy: { createdAt: "asc" },
+                    include: {
+                        recommendedProducts: true // Include products recommended by AI
+                    }
                 }
             },
             orderBy: { createdAt: "desc" }
@@ -126,7 +129,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                     id: m.id,
                     content: m.content,
                     role: m.role as "user" | "assistant" | "system",
-                    createdAt: m.createdAt
+                    createdAt: m.createdAt,
+                    // Include products if this is an assistant message with recommendations
+                    products:
+                        m.role === "assistant" && m.recommendedProducts.length > 0
+                            ? m.recommendedProducts.map((p) => ({
+                                id: p.productProdId,
+                                title: p.title,
+                                price: p.price,
+                                handle: p.handle || undefined,
+                                image: p.image || undefined,
+                                score: p.score || undefined,
+                            }))
+                            : undefined,
                 }))
             };
 

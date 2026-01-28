@@ -50,7 +50,9 @@ model Product {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  variants ProductVariant[]
+  variants              ProductVariant[]
+  // Messages where this product was recommended by the AI
+  recommendedInMessages MessageProduct[]
 
   @@index([shop])
 }
@@ -126,13 +128,30 @@ model ChatSession {
 }
 
 model Message {
-  id        String   @id @default(uuid())
-  content   String
-  role      String // "user", "assistant", or "system"
-  createdAt DateTime @default(now())
+  id                  String           @id @default(uuid())
+  content             String
+  role                String // "user", "assistant", or "system"
+  createdAt           DateTime         @default(now())
+  sessionId           String
+  session             ChatSession      @relation(fields: [sessionId], references: [id])
+  recommendedProducts MessageProduct[]
+}
 
-  sessionId String
-  session   ChatSession @relation(fields: [sessionId], references: [id])
+// Link table for products recommended by AI per message
+model MessageProduct {
+  id            String   @id @default(uuid())
+  messageId     String
+  message       Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  productProdId String
+  product       Product? @relation(fields: [productProdId], references: [prodId])
+  title         String
+  price         Float
+  handle        String?
+  image         String?
+  score         Float?
+
+  @@index([messageId])
+  @@index([productProdId])
 }
 
 // Chatbot Customization/Appearance Settings
