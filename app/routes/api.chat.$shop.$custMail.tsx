@@ -3,6 +3,7 @@ import prisma from "app/db.server";
 import { OpenAI } from "openai";
 import { generateEmbeddings } from "app/services/pineconeService";
 import { AISettingsState } from "./app.personality";
+import { LoaderFunctionArgs } from "react-router";
 
 // ============================================================================
 // 1. TYPES & INTERFACES
@@ -35,24 +36,182 @@ const PINECONE_API_KEY = process.env.PINECONE_API_KEY || "";
 const INDEX_HOST = process.env.INDEX_HOST || "";
 
 // ============================================================================
-// 3. MAIN ACTION HANDLER
+// 3. MAIN ACTION HANDLER (Shared core logic)
 // ============================================================================
 
+interface ChatResult {
+  success: boolean;
+  sessionId: string;
+  responseType: "AI" | "KEYWORD" | "MANUAL_HANDOFF";
+  userMessage: { role: "user"; content: string };
+  assistantMessage: { role: "assistant"; content: string };
+  products?: PineconeMatch[];
+  performance?: { responseTime: number; productsFound: number };
+  error?: string;
+}
+
+export const loader = async ({ request, params }: LoaderFunctionArgs) => {
+  try {
+    // Step 1: Extract parameters
+    const { shop, custMail } = params;
+    console.log("shop", shop);
+    console.log("custMail", custMail);
+    // Step 2: Validate shop parameter
+    if (!shop) {
+      return { error: "Shop parameter is required" };
+    }
+    if (!custMail) {
+      return { error: "Customer email is required" };
+    }
+
+    // Step 4: Resolve customer ID if email provided
+    let customerId: string | null = null;
+    if (custMail && custMail !== "guest") {
+      const customer = await prisma.customer.findUnique({
+        where: { shop_email: { shop: shop, email: custMail } },
+      });
+      customerId = customer?.id || null;
+    }
+    console.log("customerId", customerId);
+    // Step 5: Fetch chat session
+    let chatSession = null;
+
+    if (customerId) {
+      // Try to find session by ID
+      chatSession = await prisma.chatSession.findFirst({
+        where: { customerId: customerId, shop: shop },
+        include: {
+          messages: { orderBy: { createdAt: "asc" } },
+          customer: true,
+        },
+      });
+
+      // Verify session belongs to this shop (security check)
+      if (chatSession && chatSession.shop !== shop) {
+        return { error: "Invalid session" };
+      }
+    } 
+
+    // Step 6: Return session data or empty response
+    if (!chatSession) {
+      return {
+        session: null,
+        messages: [],
+        customer: null,
+      };
+    }
+
+    return {
+      session: {
+        id: chatSession.id,
+        shop: chatSession.shop,
+        customerId: chatSession.customerId,
+        isGuest: chatSession.isGuest,
+      },
+      messages: chatSession.messages.map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        createdAt: m.createdAt,
+      })),
+      customer: chatSession.customer,
+    };
+  } catch (error) {
+    console.error("[LOADER] Error fetching chat history:", error);
+    return { error: "Failed to fetch chat history" };
+  }
+};
+
+// React-Router Action – handles HTTP POST /api/chat/:shop/:custMail
 export const action = async ({ request, params }: ActionFunctionArgs) => {
+  try {
+    const { shop, custMail } = params;
+
+    // Parse JSON body from client: { "message": "..." }
+    let body: any = null;
+    try {
+      body = await request.json();
+    } catch {
+      // If body is not valid JSON, treat as bad request
+      return Response.json(
+        {
+          success: false,
+          error: "INVALID_REQUEST",
+          errorMessage: "Request body must be valid JSON.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const userMessageContent =
+      typeof body?.message === "string" ? body.message : undefined;
+
+    if (!userMessageContent) {
+      return Response.json(
+        {
+          success: false,
+          error: "INVALID_REQUEST",
+          errorMessage: "Missing 'message' field in request body.",
+        },
+        { status: 400 },
+      );
+    }
+
+    if (!shop || !custMail) {
+      return Response.json(
+        {
+          success: false,
+          error: "INVALID_ROUTE_PARAMS",
+          errorMessage: "Both 'shop' and 'custMail' route params are required.",
+        },
+        { status: 400 },
+      );
+    }
+
+    // Delegate to shared chat logic (also used by WebSocket server)
+    const result = await processChat(shop, custMail, userMessageContent);
+
+    return Response.json(result, {
+      status: result.success ? 200 : 500,
+    });
+  } catch (error: any) {
+    console.error("[HTTP Action Error]:", error);
+    return Response.json(
+      {
+        success: false,
+        error: "SYSTEM_ERROR",
+        errorMessage: error?.message ?? "Unknown error",
+      },
+      { status: 500 },
+    );
+  }
+};
+
+export async function processChat(
+  shop: string,
+  custMail: string,
+  userMessageContent: string,
+): Promise<ChatResult> {
   const startTime = Date.now();
 
   try {
-    const { shop, custMail } = params;
-    const cleanShop = handleShop(shop as string);
-    const userMessageContent = await handleMessage(request);
+    if (!shop) throw new Error("Shop required");
+    // Clean shop string if needed
+    const cleanShop = shop;
 
     // --- A. LOAD CONTEXT ---
-    const customerId = await handleCustomer(custMail as string, cleanShop);
-    const aiSettingsRecord = await handleAISettings(cleanShop);
+    const customer = await prisma.customer.findUnique({
+      where: { shop_email: { shop: cleanShop, email: custMail } },
+    });
+    const customerId = customer?.id;
+
+    const aiSettingsRecord = await prisma.aISettings.findUnique({
+      where: { shop: cleanShop },
+    });
     const aiSettingsData = (aiSettingsRecord?.settings ||
       {}) as unknown as AISettingsState;
 
-    // --- B. SESSION MANAGEMENT (MEMORY) ---
+    // --- B. SESSION MANAGEMENT ---
     let sessionId = "";
     let history: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
 
@@ -76,8 +235,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       }
     }
 
-    // --- C. DEFINE AI TOOLS & PROMPT ---
-    // We inject Language, Custom Instructions, and Merchant Picks here
+    // --- C. DEFINE TOOLS & PROMPT ---
     const systemPrompt = buildSystemPrompt(aiSettingsData);
 
     const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
@@ -86,28 +244,19 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         function: {
           name: "recommend_products",
           description:
-            "Search the store inventory. Use this to find specific products, categories, or check prices. WARNING: Do NOT use this for 'Order Tracking' or 'Buying'.",
+            "Search the store inventory. Use this to find products, prices, or details. WARNING: Do NOT use this for 'Order Tracking' or 'Buying'.",
           parameters: {
             type: "object",
             properties: {
               search_query: {
                 type: "string",
-                description:
-                  "The product noun (e.g. 'necklace', 'sofa'). Remove adjectives like 'cheap'.",
+                description: "The product noun. Remove adjectives.",
               },
-              max_price: {
-                type: "number",
-                description: "Filter items below this price.",
-              },
-              min_price: {
-                type: "number",
-                description: "Filter items above this price.",
-              },
+              max_price: { type: "number" },
+              min_price: { type: "number" },
               sort: {
                 type: "string",
                 enum: ["price_asc", "price_desc", "relevance"],
-                description:
-                  "Use 'price_asc' for cheap/lowest, 'price_desc' for expensive/highest.",
               },
             },
             required: ["search_query"],
@@ -116,7 +265,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       },
     ];
 
-    // --- D. FIRST AI CALL (DECISION MAKER) ---
+    // --- D. FIRST AI CALL ---
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: "system", content: systemPrompt },
       ...history,
@@ -132,22 +281,18 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     });
 
     const choice = firstResponse.choices[0].message;
-
-    // --- E. TOOL EXECUTION & DATA PROCESSING ---
     let finalAiText = choice.content || "";
     let rawProducts: any[] = [];
 
+    // --- E. TOOL EXECUTION ---
     if (choice.tool_calls) {
       messages.push(choice);
 
       for (const toolCall of choice.tool_calls) {
         if (toolCall.function.name === "recommend_products") {
           const args = JSON.parse(toolCall.function.arguments);
-          console.log(
-            `[AI] Searching: "${args.search_query}" | Sort: ${args.sort}`,
-          );
+          console.log(`[AI-Core] Searching: "${args.search_query}"`);
 
-          // 1. Run Smart Search
           const matches = await searchPinecone(
             cleanShop,
             args.search_query,
@@ -156,23 +301,17 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
             args.sort,
           );
 
-          // 2. Format Data for JSON Response (Frontend)
-          rawProducts = matches.map((m) => {
-            const safePrice =
-              parseFloat(String(m.metadata.price).replace(/[^0-9.]/g, "")) || 0;
-            return {
-              id: m.metadata.product_id,
-              title: m.metadata.title,
-              price: safePrice,
-              handle: m.metadata.handle,
-              image: m.metadata.image || "",
-              score: m.score,
-            };
-          });
+          rawProducts = matches.map((m) => ({
+            id: m.metadata.product_id,
+            title: m.metadata.title,
+            price:
+              parseFloat(String(m.metadata.price).replace(/[^0-9.]/g, "")) || 0,
+            handle: m.metadata.handle,
+            image: m.metadata.image || "",
+            score: m.score,
+          }));
 
-          // 3. Format Data for AI Context (Text only)
-          const toolResultText = formatProductsForAI(rawProducts);
-
+          const toolResultText = formatProductsForAI(rawProducts); // Using local helper logic
           messages.push({
             role: "tool",
             tool_call_id: toolCall.id,
@@ -181,17 +320,15 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         }
       }
 
-      // --- F. SECOND AI CALL (FINAL ANSWER) ---
       const secondResponse = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: messages,
         temperature: 0.4,
       });
-
       finalAiText = secondResponse.choices[0].message.content || "";
     }
 
-    // --- G. SAVE CHAT TO DB ---
+    // --- F. SAVE & RETURN ---
     if (sessionId) {
       await prisma.message.createMany({
         data: [
@@ -201,7 +338,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       });
     }
 
-    // --- H. RETURN RESPONSE ---
     return {
       success: true,
       sessionId: sessionId,
@@ -214,15 +350,15 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
         productsFound: rawProducts.length,
       },
     };
-  } catch (error) {
-    console.error("[API] Error:", error);
+  } catch (error: any) {
+    console.error("[Core Logic Error]:", error);
     return {
       success: false,
       error: "SYSTEM_ERROR",
-      errorMessage: "An error occurred while processing your request.",
+      errorMessage: error.message,
     };
   }
-};
+}
 
 // ============================================================================
 // 4. SMART SEARCH LOGIC (THE BRAIN)
@@ -378,7 +514,8 @@ function buildSystemPrompt(aiSettings: AISettingsState): string {
     aiSettings.recommendedProducts && aiSettings.recommendedProducts.length > 0
       ? aiSettings.recommendedProducts
           .map(
-            (p: { title: string; vendor: string; id: string }) => `• ${p.title} (Vendor: ${p.vendor}) - ID: ${p.id}`,
+            (p: { title: string; vendor: string; id: string }) =>
+              `• ${p.title} (Vendor: ${p.vendor}) - ID: ${p.id}`,
           )
           .join("\n")
       : "No specific recommendations set by store owner.";
