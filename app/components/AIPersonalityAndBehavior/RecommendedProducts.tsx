@@ -86,11 +86,6 @@ export function RecommendedProducts({ products, setProducts }: RecommendedProduc
                     <>
                         <s-divider />
                         <s-stack padding="none base base" gap="base">
-                            <s-stack>
-                                <s-text-area rows={4} label="AI Instruction" details="Detailed instructions..." />
-                            </s-stack>
-
-                            {/* Product List UI */}
                             <s-stack gap="small-200">
                                 <s-stack direction="inline" justifyContent="space-between" alignItems="center">
                                     <s-heading><span style={{ fontWeight: 500 }}>Recommend these products</span> <span>({products.length}/5)</span></s-heading>

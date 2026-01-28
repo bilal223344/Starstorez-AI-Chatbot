@@ -51,6 +51,7 @@ export function Policies({ data, setData }: PoliciesProps) {
                             <s-text-area
                                 placeholder="Shipping details..."
                                 value={data.shipping}
+                                rows={4}
                                 onInput={(e: CallbackEvent<"s-text-area">) => handleChange('shipping', e.currentTarget.value)}
                             />
                         </s-stack>
@@ -65,6 +66,7 @@ export function Policies({ data, setData }: PoliciesProps) {
                             <s-text-area
                                 placeholder="Payment details..."
                                 value={data.payment}
+                                rows={4}
                                 onInput={(e: CallbackEvent<"s-text-area">) => handleChange('payment', e.currentTarget.value)}
                             />
                         </s-stack>
@@ -79,6 +81,7 @@ export function Policies({ data, setData }: PoliciesProps) {
                             <s-text-area
                                 placeholder="Return details..."
                                 value={data.refund}
+                                rows={4}
                                 onInput={(e: CallbackEvent<"s-text-area">) => handleChange('refund', e.currentTarget.value)}
                             />
                         </s-stack>
