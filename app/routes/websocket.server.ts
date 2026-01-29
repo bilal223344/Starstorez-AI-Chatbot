@@ -28,9 +28,14 @@ export function setupWebSocketServer(server: Server) {
   });
   wsServerInstance = wss;
 
+  const serverAddress = server.address();
+  const port = typeof serverAddress === 'object' && serverAddress ? serverAddress.port : 'unknown';
+  
   log("✅ WebSocket Server initialized at /ws/chat", {
-    serverAddress: server.address(),
+    serverAddress: serverAddress,
+    port: port,
     path: "/ws/chat",
+    expectedPort: process.env.PORT || process.env.WS_PORT || process.env.SERVER_PORT || 'not set',
   });
 
   // Log when server is ready

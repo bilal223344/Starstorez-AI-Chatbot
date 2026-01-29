@@ -36,13 +36,17 @@ if (host === "localhost") {
   };
 }
 
+// Get port from environment or use default
+const serverPort = Number(process.env.PORT || process.env.SERVER_PORT || 59599);
+
 export default defineConfig({
   server: {
     allowedHosts: [host],
     cors: {
       preflightContinue: true,
     },
-    port: Number(process.env.PORT || 3000),
+    port: serverPort,
+    strictPort: true, // Fail if port is already in use instead of using random port
     hmr: hmrConfig,
     fs: {
       // See https://vitejs.dev/config/server-options.html#server-fs-allow for more information
@@ -55,7 +59,13 @@ export default defineConfig({
     {
       name: "websocket-init",
       configureServer(server: ViteDevServer) {
+        // Log configured port
+        console.log(`[Vite Plugin] Server configured on port: ${serverPort} (strictPort: true)`);
+        
         server.httpServer?.once("listening", () => {
+          const actualPort = server.httpServer?.address();
+          console.log(`[Vite Plugin] HTTP server listening on:`, actualPort);
+          
           // Small delay to ensure server is fully ready
           setTimeout(async () => {
             try {
@@ -74,7 +84,9 @@ export default defineConfig({
               
               if (websocketModule.setupWebSocketServer) {
                 websocketModule.setupWebSocketServer(server.httpServer!);
-                console.log("[Vite Plugin] ✅ WebSocket server initialized at /ws/chat");
+                const address = server.httpServer.address();
+                const port = typeof address === 'object' && address ? address.port : 'unknown';
+                console.log(`[Vite Plugin] ✅ WebSocket server initialized at /ws/chat on port ${port}`);
               } else {
                 console.error("[Vite Plugin] ❌ setupWebSocketServer function not found in module");
               }

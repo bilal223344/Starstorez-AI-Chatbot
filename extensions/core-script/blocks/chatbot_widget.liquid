@@ -1,0 +1,17 @@
+<div
+  id="root"
+  data-shop-name="{{ shop.name | escape }}"
+  data-customer-email="{% if customer %}{{ customer.email | escape }}{% endif %}"
+  {{ block.shopify_attributes }}
+></div>
+
+<script src="{{ 'script.js' | asset_url }}" defer></script>
+{{ 'style.css' | asset_url | stylesheet_tag }}
+
+{% schema %}
+{
+  "name": "Chatbot widget",
+  "target": "head",
+  "settings": []
+}
+{% endschema %}
