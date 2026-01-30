@@ -23,7 +23,7 @@ export const batchProcessPinecone = async (namespace: string, products: ShopifyP
                 try {
                     return prepareProductForPinecone(product);
                 } catch (e) {
-                    console.error("    Skipping malformed product:", product.id);
+                    console.error("Skipping malformed product:", product.id);
                     return null;
                 }
             }).filter(item => item !== null) as { textToEmbed: string, metadata: RawMetadata }[];
@@ -127,15 +127,17 @@ export const generateEmbeddings = async (texts: string[]) => {
                 "X-Pinecone-Api-Version": "2025-10"
             },
             body: JSON.stringify({
-                model: "llama-text-embed-v2",
+                // "multilingual-e5-large" is generally better/standard,
+                // but "llama-text-embed-v2" is fine if you specifically prefer it.
+                model: "multilingual-e5-large",
                 parameters: { input_type: "passage", truncate: "END" },
                 inputs: texts.map(text => ({ text: text }))
             })
         });
 
         if (!response.ok) {
-            const err = await response.json();
-            throw new Error(JSON.stringify(err));
+            const errorText = await response.text();
+            throw new Error(`Pinecone Embed Error (${response.status}): ${errorText}`);
         }
 
         const data = await response.json() as PineconeEmbedResponse;
@@ -190,37 +192,30 @@ export const upsertVectors = async (namespace: string, records: PineconeRecord[]
 };
 
 const prepareProductForPinecone = (product: ShopifyProductNode) => {
+    // 1. Extract Variant Data
     const flattenedVariants = product.variants.edges.map(e => ({
-        id: e.node.id,
         title: e.node.title,
         price: e.node.price,
         sku: e.node.sku,
         inventoryQuantity: e.node.inventoryQuantity,
-        image: e.node.image?.url || "",
         selectedOptions: e.node.selectedOptions
     }));
 
     const collectionTitles = product.collections.edges.map(e => e.node.title);
 
-    // Price & Stock Logic
+    // 2. Price Logic (Get Min/Max for display and filtering)
     const prices = flattenedVariants.map(v => parseFloat(v.price));
     const minPrice = prices.length ? Math.min(...prices) : 0;
     const maxPrice = prices.length ? Math.max(...prices) : 0;
     const priceDisplay = minPrice === maxPrice ? `${minPrice}` : `${minPrice} - ${maxPrice}`;
 
-    const totalInv = flattenedVariants.reduce((sum, v) => sum + (v.inventoryQuantity || 0), 0);
-    const status = totalInv > 0 ? "instock" : "outofstock";
+    // 3. Stock Status
+    const totalStock = flattenedVariants.reduce((sum, v) => sum + (v.inventoryQuantity || 0), 0);
+    const status = totalStock > 0 ? "instock" : "outofstock";
 
-    // Text Context
+    // 4. RICH TEXT EMBEDDING (CRITICAL IMPROVEMENT)
     const textToEmbed = `
-        Product: ${product.title}
-        Vendor: ${product.vendor}
-        Type: ${product.productType}
-        Description: ${product.description}
-        Tags: ${product.tags.join(", ")}
-        Collections: ${collectionTitles.join(", ")}
-        Price: ${priceDisplay}
-        In Stock: ${status}
+       ${product.title} ${product.description} ${product.tags.join(", ")} ${collectionTitles.join(", ")} ${status}
     `.trim().replace(/\s+/g, " ");
 
     // Metadata
@@ -229,15 +224,11 @@ const prepareProductForPinecone = (product: ShopifyProductNode) => {
         product_id: product.id,
         title: product.title,
         vendor: product.vendor,
-        productType: product.productType,
         handle: product.handle,
-        image: product.featuredImage?.url || "",
-        price: priceDisplay,
-        inventory_status: status,
+        price_val: minPrice,
         collections: collectionTitles,
         tags: product.tags,
         options: JSON.stringify(product.options),
-        variants: JSON.stringify(flattenedVariants)
     };
 
     return { textToEmbed, metadata };
@@ -272,9 +263,9 @@ export const deleteVectorFromPinecone = async (namespace: string, vectorId: stri
 
 export const prepareOrderForPinecone = (order: SavedOrder): VectorData => {
     // order argument is the result from prisma.order.upsert (includes items and customer)
-    
+
     const itemNames = order.items.map((i) => `${i.quantity}x ${i.productName}`).join(", ");
-    
+
     // 1. Text Context: This is what the AI searches against
     const textToEmbed = `
         Order Number: ${order.orderNumber}
