@@ -1,7 +1,8 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "069d96c1154dc812ea9a01117cc18ed6"
-name = "AI-ChatBot"
+name = "startstorez AI Chatbot"
+handle = "startstorez-chatbot"
 application_url = "https://chatbot.startstorez.com"
 embedded = true
 
@@ -13,15 +14,15 @@ api_version = "2026-04"
 
   [[webhooks.subscriptions]]
   topics = [ "app/scopes_update" ]
-  uri = "https://example.com/webhooks/app/scopes_update"
+  uri = "https://chatbot.startstorez.com/webhooks/app/scopes_update"
 
   [[webhooks.subscriptions]]
   topics = [ "app/uninstalled" ]
-  uri = "https://example.com/webhooks/app/uninstalled"
+  uri = "https://chatbot.startstorez.com/webhooks/app/uninstalled"
 
   [[webhooks.subscriptions]]
   topics = [ "products/create", "products/delete", "products/update" ]
-  uri = "https://example.com/api/webhooks"
+  uri = "https://chatbot.startstorez.com/api/webhooks"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
