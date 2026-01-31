@@ -54,8 +54,8 @@ interface CustomerSidebarProps {
     setSourceFilter: (source: string) => void;
     modeFilter: string;
     setModeFilter: (mode: string) => void;
-    dateFilter: string; // New
-    setDateFilter: (date: string) => void; // New
+    dateFilter: string;
+    setDateFilter: (date: string) => void;
     formatTime: (date: Date) => string;
 }
 
@@ -130,16 +130,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                     content: m.content,
                     role: m.role as "user" | "assistant" | "system",
                     createdAt: m.createdAt,
-                    // Include products if this is an assistant message with recommendations
+                    // FIX: Convert nulls from Prisma to undefined for TypeScript compatibility
                     products:
                         m.role === "assistant" && m.recommendedProducts.length > 0
                             ? m.recommendedProducts.map((p) => ({
-                                id: p.productProdId,
+                                id: p.productProdId ?? undefined, // Converts null to undefined
                                 title: p.title,
                                 price: p.price,
-                                handle: p.handle || undefined,
-                                image: p.image || undefined,
-                                score: p.score || undefined,
+                                handle: p.handle ?? undefined,    // Converts null to undefined
+                                image: p.image ?? undefined,      // Converts null to undefined
+                                score: p.score ?? undefined,      // Converts null to undefined
                             }))
                             : undefined,
                 }))
@@ -251,7 +251,6 @@ export default function ChatsManagement() {
                 borderRadius: "14px",
                 overflow: "hidden",
                 background: "#EEEEEE"
-                // background: "var(--p -color-bg-surface)"
             }}>
                 <CustomerSidebar
                     customers={filteredCustomers}
@@ -299,11 +298,9 @@ export function CustomerSidebar({
     setModeFilter,
     dateFilter,
     setDateFilter,
-    // formatTime,
 }: CustomerSidebarProps) {
     return (
         <s-box borderStyle="none solid none none">
-            {/* Fix: Wrapped s-stack in a div to handle height since s-stack doesn't take 'style' */}
             <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
                 <s-stack gap="none">
                     <div style={{ backgroundColor: "#B5EAEA", height: "72px" }}>
@@ -359,8 +356,8 @@ export function CustomerSidebar({
                         {customers.map((customer) => {
                             const lastMsg = customer.chats[0]?.messages.slice(-1)[0];
                             return (
-                                <>
-                                    <s-clickable key={customer.id} onClick={() => setSelectedCustomerId(customer.id)} borderRadius="base">
+                                <div key={customer.id}>
+                                    <s-clickable onClick={() => setSelectedCustomerId(customer.id)} borderRadius="base">
                                         <s-box padding="base" background={customer.id === selectedCustomerId ? "transparent" : undefined} borderStyle="solid">
                                             <s-stack gap="small-200">
                                                 <s-grid gridTemplateColumns="1fr auto" alignItems="center">
@@ -376,7 +373,7 @@ export function CustomerSidebar({
                                         </s-box>
                                     </s-clickable>
                                     <s-divider />
-                                </>
+                                </div>
                             );
                         })}
                     </div>
@@ -395,6 +392,9 @@ function ChatInterface({
     messages,
     aiEnabled,
     setAiEnabled,
+    replyText,
+    setReplyText,
+    handleAiSuggest,
 }: ChatInterfaceProps) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const lastMessageIdRef = useRef<string | null>(null);
@@ -425,7 +425,6 @@ function ChatInterface({
     const handleScroll = () => {
         if (!scrollRef.current) return;
         const { scrollTop, clientHeight, scrollHeight } = scrollRef.current;
-        // Use a small threshold instead of strict 0 so loading reliably triggers
         if (scrollTop <= 10 && visibleCount < messages.length) {
             setVisibleCount(prev =>
                 Math.min(prev + 30, messages.length)
@@ -461,10 +460,6 @@ function ChatInterface({
                 <div>
                     <div style={{ fontWeight: 600, fontSize: "18px" }}>{customer.firstName} {customer.lastName}</div>
                     <div style={{ fontSize: "10px", opacity: 0.9 }}>{customer.email} | {customer.source}</div>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <span style={{ fontSize: "14px" }}>AI Agent</span>
-                    <s-switch checked={aiEnabled} onChange={(e: CallbackEvent<"s-switch">) => setAiEnabled(e.currentTarget.checked)} />
                 </div>
             </div>
 
@@ -562,24 +557,6 @@ function ChatInterface({
                     </s-button>
                 </div>
             )}
-
-            {/* <div style={{ padding: "10px 14px", borderTop: `2px solid ${primaryColor}`, background: "#EEEEEE" }}>
-                <textarea
-                    rows={3}
-                    placeholder="Type your message..."
-                    value={replyText}
-                    disabled={!aiEnabled}
-                    onChange={(e) => setReplyText(e.target.value)}
-                    style={{ maxWidth: "100%", width: "98%", height: "40px", border: "1px solid #1B211A", color: "#1B211A", borderRadius: "0.8em", padding: "6px 9px", marginBottom: "4px", resize: "none", outline: "none" }}
-                />
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <s-heading><span style={{ fontSize: "16px" }}>{aiEnabled ? "AI auto-reply on" : "Manual mode"}</span></s-heading>
-                    <div style={{ display: "flex", gap: "6px" }}>
-                        <s-button variant="secondary" onClick={handleAiSuggest} disabled={!aiEnabled}>AI Suggest</s-button>
-                        <s-button variant="primary" onClick={() => setReplyText("")} disabled={!replyText.trim()}>Send</s-button>
-                    </div>
-                </div>
-            </div> */}
         </div>
     );
 }

@@ -1,4 +1,4 @@
-import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
+import { Links, LinksFunction, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
 
 
 export const links: LinksFunction = () => [

@@ -2,7 +2,7 @@ import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "re
 import { useFetcher, useLoaderData } from "react-router";
 import { authenticate } from "../shopify.server";
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { formatDistanceToNow } from "date-fns";
+import { formatDistanceToNow, subDays } from "date-fns";
 import prisma from "../db.server";
 import { syncProduct } from "app/services/productService";
 
@@ -13,14 +13,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
   const shop = session.shop;
 
-  // Fetch App ID and Main Theme ID for Deep Link
-  let appId, themeId;
+  // --- 1. Fetch Theme ID for Deep Linking ---
+  let themeId;
   try {
     const graphqlResponse = await admin.graphql(
       `query GetAppAndTheme {
-        app {
-          id
-        }
         themes(first: 1, roles: MAIN) {
           edges {
             node {
@@ -31,27 +28,36 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       }`
     );
     const { data }: any = await graphqlResponse.json();
-    appId = data?.app?.id?.split("/").pop();
     themeId = data?.themes?.edges?.[0]?.node?.id?.split("/").pop();
   } catch (error) {
     console.warn("Failed to fetch App ID or Theme ID:", error);
-    // Continue without deep link to avoid crashing the dashboard
   }
 
-  const [totalMessages, pendingHandoffs, recentChats, syncStatus] = await Promise.all([
-    // 1. Total Messages across all sessions for this shop
+  // --- 2. Parallel Data Fetching ---
+  const [
+    totalMessages,
+    pendingHandoffs,
+    recentChats,
+    syncStatus,
+    totalProducts,
+    totalCustomers
+  ] = await Promise.all([
+    // A. Total Messages
     prisma.message.count({
       where: { session: { shop } }
     }),
-    // 2. Human Handoffs (Sessions where the last message is from a user, not assistant)
+
+    // B. Human Handoffs (Sessions needing attention)
     prisma.chatSession.count({
       where: {
         shop,
-        messages: { some: {} }, // Has messages
-        NOT: { messages: { some: { role: "assistant" } } } // Simplistic logic for 'needs action'
+        messages: { some: {} },
+        // Logic: Session exists, has messages, but NO assistant reply implies human needed OR manual takeover
+        NOT: { messages: { some: { role: "assistant" } } }
       }
     }),
-    // 3. Recent Conversations for the table
+
+    // C. Recent Conversations
     prisma.chatSession.findMany({
       where: { shop },
       take: 5,
@@ -64,15 +70,26 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         }
       }
     }),
-    // 4. AI Training Status (Product Sync)
+
+    // D. AI Training Status
     prisma.product.groupBy({
       by: ['isSynced'],
       where: { shop },
       _count: true
+    }),
+
+    // E. Total Products (New Metric)
+    prisma.product.count({
+      where: { shop }
+    }),
+
+    // F. Active Customers (New Metric - Total customers in DB)
+    prisma.customer.count({
+      where: { shop }
     })
   ]);
 
-  // Format Sync Status
+  // --- 3. Format Sync Status ---
   const syncedCount = syncStatus.find(s => s.isSynced)?._count || 0;
   const unsyncedCount = syncStatus.find(s => !s.isSynced)?._count || 0;
 
@@ -81,15 +98,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     stats: {
       totalMessages,
       pendingHandoffs,
-      resolutionRate: "84%" // This would typically be a calculated field or from a 'Stats' table
+      totalProducts,
+      totalCustomers
     },
     recentChats,
     syncStatus: {
       syncedCount,
       unsyncedCount
     },
-    appId,
-    themeId
+    themeId,
+    appId: process.env.SHOPIFY_API_KEY || "",
   };
 };
 
@@ -113,11 +131,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 // DASHBOARD COMPONENT
 // ============================================================================
 export default function Dashboard() {
-  const { stats, recentChats, syncStatus, shop, appId, themeId } = useLoaderData<typeof loader>();
+  const { stats, recentChats, syncStatus, shop, themeId, appId } = useLoaderData<typeof loader>();
 
-  // Construct Deep Link URL to Theme Editor
-  // Format: https://{shop}/admin/themes/{themeId}/editor?context=apps&activateAppId={appId}/{blockHandle}
-  const deepLinkUrl = (themeId && appId)
+  const deepLinkUrl = (themeId)
     ? `https://${shop}/admin/themes/${themeId}/editor?context=apps&activateAppId=${appId}/chatbot_widget`
     : "/app/customization";
 
@@ -128,22 +144,26 @@ export default function Dashboard() {
       {/* 1. KEY METRICS */}
       <s-section padding="base">
         <s-grid gridTemplateColumns="repeat(4, 1fr)" gap="base">
+
+          {/* Total Products Card */}
           <s-box padding="base" border="base" borderRadius="base">
             <s-stack gap="small-100">
-              <s-text tone="neutral">Resolution Rate</s-text>
-              <s-heading>{stats.resolutionRate}</s-heading>
-              <s-badge tone="success" icon="arrow-up">12%</s-badge>
+              <s-text tone="neutral">Total Products</s-text>
+              <s-heading>{stats.totalProducts.toLocaleString()}</s-heading>
+              <s-text tone="neutral">Available for AI</s-text>
             </s-stack>
           </s-box>
 
+          {/* Active Customers Card */}
           <s-box padding="base" border="base" borderRadius="base">
             <s-stack gap="small-100">
-              <s-text tone="neutral">Sales via Chat</s-text>
-              <s-heading>$1,240.00</s-heading>
-              <s-text tone="neutral">Last 7 days</s-text>
+              <s-text tone="neutral">Total Customers</s-text>
+              <s-heading>{stats.totalCustomers.toLocaleString()}</s-heading>
+              <s-text tone="neutral">Interacted with bot</s-text>
             </s-stack>
           </s-box>
 
+          {/* Total Messages Card */}
           <s-box padding="base" border="base" borderRadius="base">
             <s-stack gap="small-100">
               <s-text tone="neutral">Total Messages</s-text>
@@ -151,13 +171,19 @@ export default function Dashboard() {
             </s-stack>
           </s-box>
 
+          {/* Human Handoffs Card */}
           <s-box padding="base" border="base" borderRadius="base">
             <s-stack gap="small-100">
               <s-text tone="neutral">Human Handoffs</s-text>
               <s-heading>{stats.pendingHandoffs}</s-heading>
-              {stats.pendingHandoffs > 0 && <s-badge tone="caution">Needs Action</s-badge>}
+              {stats.pendingHandoffs > 0 ? (
+                <s-badge tone="caution">Needs Action</s-badge>
+              ) : (
+                <s-badge tone="success">All Clear</s-badge>
+              )}
             </s-stack>
           </s-box>
+
         </s-grid>
       </s-section>
 
@@ -181,7 +207,7 @@ export default function Dashboard() {
                     <s-table-cell>
                       <s-stack direction="inline" gap="small" alignItems="center">
                         <s-avatar size="small" initials={chat.customer?.firstName?.[0] || "G"} />
-                        <s-link href={`/app/chat/${chat.id}`}>
+                        <s-link href={`/app/chats/management?customerId=${chat.customer?.id || ''}`}>
                           {chat.customer?.email || "Guest User"}
                         </s-link>
                       </s-stack>
