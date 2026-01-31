@@ -1,114 +1,139 @@
-import { WebSocketServer, WebSocket } from "ws";
-import {
-  handleWebSocketMessage,
-  registerWebSocketClient,
-} from "./api.chat.$shop.$custMail";
-import { Server } from "http";
+// app/services/websocket.server.ts
+import { WebSocketServer, WebSocket, RawData } from "ws"; // Added RawData
+import type { Server, IncomingMessage } from "http";
+import { processChat } from "app/services/chat/chat.processor";
+import { WebSocketType } from "app/types/chat.types";
 
-function log(label: string, details: Record<string, unknown> = {}) {
-  const timestamp = new Date().toISOString();
-  console.log(`[WS][${timestamp}] ${label}`, details);
-}
+// ============================================================================
+// CONFIGURATION & STATE
+// ============================================================================
+export const WS_PORT = Number(process.env.WS_PORT || 3009);
+export const WS_PATH = process.env.WS_PATH || "/ws/chat";
 
-// Track if WebSocket server is already set up
-let wsServerInstance: WebSocketServer | null = null;
+// Registry: "shop:email" -> WebSocket
+const activeClients = new Map<string, WebSocketType>();
+
+// Global Server Instance (to prevent double-init during HMR)
+let wssInstance: WebSocketServer | null = null;
+
+// ============================================================================
+// 1. INITIALIZATION (CALLED BY VITE)
+// ============================================================================
 
 export function setupWebSocketServer(server: Server) {
-  // Prevent duplicate initialization
-  if (wsServerInstance) {
-    log("⚠️ WebSocket server already initialized, skipping");
-    return;
-  }
+  if (wssInstance) return; // Already initialized
 
-  // 1. Initialize with 'noServer: true' so it doesn't auto-attach
-  const wss = new WebSocketServer({
-    noServer: true,
-    // Remove 'path' here, we handle it manually below
-    perMessageDeflate: false,
-  });
-  wsServerInstance = wss;
+  console.log("[WS-Init] Attaching WebSocket Server...");
 
-  log("✅ WebSocket Server initialized (waiting for upgrades on /ws/chat)");
+  // 1. Create WebSocket Server (NoServer mode allows us to handle upgrades manually)
+  wssInstance = new WebSocketServer({ noServer: true });
 
-  // Log when server is ready
-  wss.on("listening", () => {
-    log("🎧 WebSocket server is listening for connections");
-  });
-
-  // 2. Manually handle the upgrade event
+  // 2. Listen for HTTP Upgrades (ws:// requests)
   server.on("upgrade", (request, socket, head) => {
-    const pathname = new URL(request.url || "", `http://${request.headers.host}`).pathname;
+    const url = new URL(request.url || "", `http://${request.headers.host}`);
 
-    // 🚨 CRITICAL: Only handle upgrades for YOUR path
-    if (pathname === "/ws/chat") {
-      log("🔄 WebSocket upgrade request received for /ws/chat");
+    // Only handle OUR path
+    if (url.pathname !== WS_PATH) return;
 
-      wss.handleUpgrade(request, socket, head, (ws) => {
-        wss.emit("connection", ws, request);
-      });
-    }
-    // 🚨 CRITICAL: If path is NOT /ws/chat, do NOTHING. 
-    // This allows Vite's internal listener to handle HMR updates.
-  });
+    // 3. Handle the Upgrade
+    wssInstance!.handleUpgrade(request, socket, head, (ws) => {
+      const shop = url.searchParams.get("shop");
+      const custMail = url.searchParams.get("custMail");
 
-  wss.on("connection", (ws, req) => {
-    log("🔌 WebSocket connection established", {
-      url: req.url,
-      remoteAddress: req.socket.remoteAddress,
-    });
-
-    // 1. Extract Params from URL (ws://host/ws/chat?shop=x&custMail=y)
-    // Note: req.url here comes from the handleUpgrade call
-    const url = new URL(req.url || "", `http://${req.headers.host}`);
-    const shop = url.searchParams.get("shop");
-    const custMail = url.searchParams.get("custMail");
-
-    if (!shop || !custMail) {
-      log("❌ Connection rejected: Missing credentials");
-      ws.close(1008, "Missing shop or custMail params");
-      return;
-    }
-
-    // 2. Register Client
-    registerWebSocketClient(shop, custMail, ws);
-
-    log("✅ Client connected", { shop, custMail });
-
-    // 3. Handle Messages
-    ws.on("message", async (rawMessage) => {
-      const payload = rawMessage.toString();
-
-      try {
-        const data = JSON.parse(payload);
-        const userMessage = data.message as string | undefined;
-
-        if (!userMessage) {
-          ws.send(JSON.stringify({ success: false, error: "INVALID_REQUEST" }));
-          return;
-        }
-
-        // Handle Logic
-        const result = await handleWebSocketMessage(shop, custMail, userMessage, ws);
-
-        log("✅ Message processed", { success: result.success });
-      } catch (error) {
-        log("❌ Message error", { error: (error as Error).message });
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ success: false, error: "SYSTEM_ERROR" }));
-        }
+      if (shop && custMail) {
+        // Emit connection event to our logic
+        wssInstance!.emit("connection", ws, request, { shop, custMail });
+      } else {
+        ws.close(1008, "Missing credentials");
       }
     });
+  });
 
-    ws.on("close", () => {
-      log("🔌 Client disconnected", { shop, custMail });
-    });
+  // 3. Handle Connections
+  wssInstance.on("connection", (ws: WebSocket, _req: IncomingMessage, clientInfo: any) => {
+    const { shop, custMail } = clientInfo;
 
-    ws.on("error", (err) => {
-      log("❌ Socket error", { error: (err as Error).message });
+    // A. Register
+    registerWebSocketClient(shop, custMail, ws);
+
+    // B. Listen for Messages
+    ws.on("message", async (rawMessage: RawData) => {
+      try {
+        const msgString = rawMessage.toString();
+        // Call the Business Logic (Chat Processor)
+        const result = await processChat(shop, custMail, msgString);
+        sendToClient(ws, result);
+      } catch (err) {
+        console.error("Message processing failed", err);
+      }
     });
   });
 
-  wss.on("error", (error) => {
-    log("❌ WebSocket Server error", { error: (error as Error).message });
-  });
+  console.log(`[WS-Init] ✅ Ready at ${WS_PATH}`);
+}
+
+// ============================================================================
+// 2. CLIENT MANAGEMENT
+// ============================================================================
+
+export function registerWebSocketClient(shop: string, custMail: string, ws: WebSocketType) {
+  const clientKey = `${shop}:${custMail}`;
+  activeClients.set(clientKey, ws);
+  setupCleanup(ws, clientKey);
+  console.log(`[WS-Registry] Registered: ${clientKey} | Total: ${activeClients.size}`);
+}
+
+function setupCleanup(ws: WebSocketType, key: string) {
+  const cleanup = () => {
+    if (activeClients.get(key) === ws) {
+      activeClients.delete(key);
+      console.log(`[WS-Registry] Disconnected: ${key}`);
+    }
+  };
+
+  ws.on("close", cleanup);
+  ws.on("error", cleanup);
+}
+
+// ============================================================================
+// 3. SENDING & BROADCASTING
+// ============================================================================
+
+export function sendToClient(ws: WebSocketType, data: unknown) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      ws.send(JSON.stringify(data));
+    } catch (e) {
+      console.error("[WS-Send] Error:", e);
+    }
+  }
+}
+
+export function broadcastToClient(shop: string, custMail: string, data: unknown) {
+  const key = `${shop}:${custMail}`;
+  const ws = activeClients.get(key);
+  if (ws) {
+    sendToClient(ws, data);
+    console.log(`[WS-Broadcast] Sent to ${key}`);
+  }
+}
+
+// ============================================================================
+// 4. UTILS
+// ============================================================================
+
+export function getWebSocketUrl(shop: string, custMail: string): string {
+  const protocol = process.env.NODE_ENV === "production" ? "wss" : "ws";
+
+  let host = "localhost:3000";
+
+  if (process.env.SHOPIFY_APP_URL) {
+    // This handles the Tunnel URL automatically (e.g. random-id.trycloudflare.com)
+    host = new URL(process.env.SHOPIFY_APP_URL).host;
+  } else if (process.env.PORT) {
+    // Fallback to the local port if no tunnel exists yet
+    host = `localhost:${process.env.PORT}`;
+  }
+
+  return `${protocol}://${host}${process.env.WS_PATH || "/ws/chat"}?shop=${encodeURIComponent(shop)}&custMail=${encodeURIComponent(custMail)}`;
 }
