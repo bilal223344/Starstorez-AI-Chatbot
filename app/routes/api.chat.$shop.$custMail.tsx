@@ -1,7 +1,7 @@
 import { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { processChat } from "app/services/chat/chat.processor";
 import { fetchChatHistory } from "app/services/db/chat.db";
-import { broadcastToClient } from "app/routes/websocket.server";
+import { broadcastToClient } from "app/services/websocket.server";
 
 // ============================================================================
 // POST: Handle New Messages
