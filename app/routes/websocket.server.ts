@@ -19,43 +19,36 @@ export function setupWebSocketServer(server: Server) {
     log("⚠️ WebSocket server already initialized, skipping");
     return;
   }
-  
-  const wss = new WebSocketServer({ 
-    server, 
-    path: "/ws/chat",
-    // Allow connections from any origin (adjust for production)
+
+  // 1. Initialize with 'noServer: true' so it doesn't auto-attach
+  const wss = new WebSocketServer({
+    noServer: true,
+    // Remove 'path' here, we handle it manually below
     perMessageDeflate: false,
   });
   wsServerInstance = wss;
 
-  const serverAddress = server.address();
-  const port = typeof serverAddress === 'object' && serverAddress ? serverAddress.port : 'unknown';
-  
-  log("✅ WebSocket Server initialized at /ws/chat", {
-    serverAddress: serverAddress,
-    port: port,
-    path: "/ws/chat",
-    expectedPort: process.env.PORT || process.env.WS_PORT || process.env.SERVER_PORT || 'not set',
-  });
+  log("✅ WebSocket Server initialized (waiting for upgrades on /ws/chat)");
 
   // Log when server is ready
   wss.on("listening", () => {
     log("🎧 WebSocket server is listening for connections");
   });
 
-  // Log upgrade requests (before connection is established)
-  server.on("upgrade", (request) => {
+  // 2. Manually handle the upgrade event
+  server.on("upgrade", (request, socket, head) => {
     const pathname = new URL(request.url || "", `http://${request.headers.host}`).pathname;
+
+    // 🚨 CRITICAL: Only handle upgrades for YOUR path
     if (pathname === "/ws/chat") {
-      log("🔄 WebSocket upgrade request received", {
-        url: request.url,
-        headers: {
-          upgrade: request.headers.upgrade,
-          connection: request.headers.connection,
-          "sec-websocket-key": request.headers["sec-websocket-key"] ? "present" : "missing",
-        },
+      log("🔄 WebSocket upgrade request received for /ws/chat");
+
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit("connection", ws, request);
       });
     }
+    // 🚨 CRITICAL: If path is NOT /ws/chat, do NOTHING. 
+    // This allows Vite's internal listener to handle HMR updates.
   });
 
   wss.on("connection", (ws, req) => {
@@ -65,124 +58,57 @@ export function setupWebSocketServer(server: Server) {
     });
 
     // 1. Extract Params from URL (ws://host/ws/chat?shop=x&custMail=y)
+    // Note: req.url here comes from the handleUpgrade call
     const url = new URL(req.url || "", `http://${req.headers.host}`);
     const shop = url.searchParams.get("shop");
     const custMail = url.searchParams.get("custMail");
 
     if (!shop || !custMail) {
-      log("❌ Connection rejected: Missing credentials", {
-        remoteAddress: req.socket.remoteAddress,
-        url: req.url,
-      });
+      log("❌ Connection rejected: Missing credentials");
       ws.close(1008, "Missing shop or custMail params");
       return;
     }
 
-    log("🔌 Client connecting", {
-      shop,
-      custMail,
-      remoteAddress: req.socket.remoteAddress,
-    });
-
-    // 2. Register Client using the helper function
+    // 2. Register Client
     registerWebSocketClient(shop, custMail, ws);
 
-    log("✅ Client connected and registered", {
-      shop,
-      custMail,
-      remoteAddress: req.socket.remoteAddress,
-    });
+    log("✅ Client connected", { shop, custMail });
 
-    // 3. Handle Messages using the helper function
+    // 3. Handle Messages
     ws.on("message", async (rawMessage) => {
       const payload = rawMessage.toString();
-      log("📨 Message received", { shop, custMail, raw: payload });
 
       try {
-        // Parse incoming message (Client sends: { "message": "Show me blue shirts" })
         const data = JSON.parse(payload);
         const userMessage = data.message as string | undefined;
 
         if (!userMessage) {
-          log("⚠️ Ignored message without 'message' field", { shop, custMail });
-          ws.send(
-            JSON.stringify({
-              success: false,
-              error: "INVALID_REQUEST",
-              errorMessage: "Missing 'message' field",
-            })
-          );
+          ws.send(JSON.stringify({ success: false, error: "INVALID_REQUEST" }));
           return;
         }
 
-        const start = Date.now();
-
-        // --- USE THE HELPER FUNCTION FROM ACTION ---
+        // Handle Logic
         const result = await handleWebSocketMessage(shop, custMail, userMessage, ws);
 
-        log("✅ Message processed", {
-          shop,
-          custMail,
-          durationMs: Date.now() - start,
-          success: result.success,
-          productsCount: result.products?.length || 0,
-        });
+        log("✅ Message processed", { success: result.success });
       } catch (error) {
-        log("❌ Message error", {
-          shop,
-          custMail,
-          error: (error as Error).message,
-        });
+        log("❌ Message error", { error: (error as Error).message });
         if (ws.readyState === WebSocket.OPEN) {
-          ws.send(
-            JSON.stringify({
-              success: false,
-              error: "SYSTEM_ERROR",
-              errorMessage: (error as Error).message || "Processing failed",
-            })
-          );
+          ws.send(JSON.stringify({ success: false, error: "SYSTEM_ERROR" }));
         }
       }
     });
 
-    ws.on("close", (code, reason) => {
-      log("🔌 Client disconnected", {
-        shop,
-        custMail,
-        code,
-        reason: reason.toString(),
-      });
-      // Client cleanup is handled by registerWebSocketClient
+    ws.on("close", () => {
+      log("🔌 Client disconnected", { shop, custMail });
     });
 
     ws.on("error", (err) => {
-      log("❌ Socket error", {
-        shop,
-        custMail,
-        error: (err as Error).message,
-      });
+      log("❌ Socket error", { error: (err as Error).message });
     });
   });
 
   wss.on("error", (error) => {
     log("❌ WebSocket Server error", { error: (error as Error).message });
   });
-
-  log("🚀 WebSocket Server ready and listening");
-}
-
-// Auto-initialize if server is available in global scope (for some environments)
-if (typeof global !== "undefined") {
-  const globalAny = global as { httpServer?: Server };
-  if (globalAny.httpServer && globalAny.httpServer instanceof Server) {
-    setupWebSocketServer(globalAny.httpServer);
-  }
-}
-
-// Also try to get server from process (for Node.js environments)
-if (typeof process !== "undefined" && (process as { httpServer?: Server }).httpServer) {
-  const processServer = (process as { httpServer?: Server }).httpServer;
-  if (processServer instanceof Server) {
-    setupWebSocketServer(processServer);
-  }
 }

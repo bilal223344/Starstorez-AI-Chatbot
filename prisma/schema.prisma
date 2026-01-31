@@ -142,8 +142,8 @@ model MessageProduct {
   id            String   @id @default(uuid())
   messageId     String
   message       Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  productProdId String
-  product       Product? @relation(fields: [productProdId], references: [prodId])
+  productProdId String?
+  product       Product? @relation(fields: [productProdId], references: [prodId], onDelete: SetNull)
   title         String
   price         Float
   handle        String?

@@ -19,6 +19,23 @@ const shopify = shopifyApp({
   future: {
     expiringOfflineAccessTokens: true,
   },
+  hooks: {
+    afterAuth: async ({ session }) => {
+      // Trigger the sync process in the background
+      console.log(`[Auth] afterAuth triggered for ${session.shop}`);
+      // changing imports inside the hook to avoid circular dependency if any, 
+      // but top-level import is better if safe.
+      // However, we need to import performInitialSync.
+      const { performInitialSync } = await import("./services/syncService");
+      if (session.accessToken) {
+        console.log(`[Install] Starting background sync for ${session.shop}`);
+        // Run without awaiting to avoid blocking the auth callback
+        performInitialSync(session.shop, session.accessToken).catch(err => {
+          console.error(`[Install Error] Sync failed for ${session.shop}`, err);
+        });
+      }
+    },
+  },
   ...(process.env.SHOP_CUSTOM_DOMAIN
     ? { customShopDomains: [process.env.SHOP_CUSTOM_DOMAIN] }
     : {}),

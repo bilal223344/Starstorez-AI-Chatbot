@@ -450,11 +450,9 @@ function ChatInterface({
     }, [messages, visibleCount]);
 
     if (!customer) {
-        return (
-            <div style={{ display: "flex", height: "100%", alignItems: "center", justifyContent: "center" }}>
-                <s-text tone="neutral">Select a customer to start chatting</s-text>
-            </div>
-        );
+        return (<div style={{ display: "flex", height: "100%", alignItems: "center", justifyContent: "center" }}>
+            <s-text tone="neutral">Select a customer to start chatting</s-text>
+        </div>);
     }
 
     return (
@@ -492,10 +490,8 @@ function ChatInterface({
                             }}
                         >
                             <div
-                                // Render AI/user content as HTML so bold text, line breaks,
-                                // and product lists from the chatbot display correctly.
                                 dangerouslySetInnerHTML={{
-                                    __html: msg.content.replace(/\n/g, "<br/>")
+                                    __html: (msg.content || "").replace(/\n/g, "<br/>")
                                 }}
                             />
 

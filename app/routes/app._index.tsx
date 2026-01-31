@@ -10,8 +10,33 @@ import { syncProduct } from "app/services/productService";
 // LOADER - Aggregate Real Prisma Data
 // ============================================================================
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
   const shop = session.shop;
+
+  // Fetch App ID and Main Theme ID for Deep Link
+  let appId, themeId;
+  try {
+    const graphqlResponse = await admin.graphql(
+      `query GetAppAndTheme {
+        app {
+          id
+        }
+        themes(first: 1, roles: MAIN) {
+          edges {
+            node {
+              id
+            }
+          }
+        }
+      }`
+    );
+    const { data }: any = await graphqlResponse.json();
+    appId = data?.app?.id?.split("/").pop();
+    themeId = data?.themes?.edges?.[0]?.node?.id?.split("/").pop();
+  } catch (error) {
+    console.warn("Failed to fetch App ID or Theme ID:", error);
+    // Continue without deep link to avoid crashing the dashboard
+  }
 
   const [totalMessages, pendingHandoffs, recentChats, syncStatus] = await Promise.all([
     // 1. Total Messages across all sessions for this shop
@@ -62,7 +87,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     syncStatus: {
       syncedCount,
       unsyncedCount
-    }
+    },
+    appId,
+    themeId
   };
 };
 
@@ -86,7 +113,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 // DASHBOARD COMPONENT
 // ============================================================================
 export default function Dashboard() {
-  const { stats, recentChats, syncStatus } = useLoaderData<typeof loader>();
+  const { stats, recentChats, syncStatus, shop, appId, themeId } = useLoaderData<typeof loader>();
+
+  // Construct Deep Link URL to Theme Editor
+  // Format: https://{shop}/admin/themes/{themeId}/editor?context=apps&activateAppId={appId}/{blockHandle}
+  const deepLinkUrl = (themeId && appId)
+    ? `https://${shop}/admin/themes/${themeId}/editor?context=apps&activateAppId=${appId}/chatbot_widget`
+    : "/app/customization";
+
   const fetcher = useFetcher();
 
   return (
@@ -197,7 +231,8 @@ export default function Dashboard() {
           <s-stack gap="base">
             <s-heading>Widget Appearance</s-heading>
             <s-paragraph>Update your bot&apos;s colors, welcome message, and positioning to match your store&apos;s theme.</s-paragraph>
-            <s-button variant="secondary" href="/app/customization">Open Visual Editor</s-button>
+            {/* Opens in new tab because it leads to Shopify Admin */}
+            <s-button variant="secondary" href={deepLinkUrl} target={deepLinkUrl.startsWith('http') ? "_blank" : undefined}>Open Visual Editor</s-button>
           </s-stack>
         </s-box>
       </s-grid>

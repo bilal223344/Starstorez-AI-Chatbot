@@ -237,7 +237,7 @@ export default function AIPersonalityAndBehavior() {
         setIsSaving(false);
       }
     }
-  }, [fetcher.data, shopify]);
+  }, []);
 
   const handleExampleClick = (type: "professional" | "friendly" | "sales") => {
     let text = "";

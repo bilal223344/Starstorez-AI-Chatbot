@@ -19,6 +19,9 @@ if (
 const host = new URL(process.env.SHOPIFY_APP_URL || "http://localhost")
   .hostname;
 
+// Get port from environment or use default
+const serverPort = Number(process.env.PORT || process.env.SERVER_PORT || 59599);
+
 let hmrConfig;
 if (host === "localhost") {
   hmrConfig = {
@@ -31,13 +34,10 @@ if (host === "localhost") {
   hmrConfig = {
     protocol: "wss",
     host: host,
-    port: parseInt(process.env.FRONTEND_PORT!) || 8002,
+    port: serverPort,
     clientPort: 443,
   };
 }
-
-// Get port from environment or use default
-const serverPort = Number(process.env.PORT || process.env.SERVER_PORT || 59599);
 
 export default defineConfig({
   server: {
@@ -61,16 +61,16 @@ export default defineConfig({
       configureServer(server: ViteDevServer) {
         // Log configured port
         console.log(`[Vite Plugin] Server configured on port: ${serverPort} (strictPort: true)`);
-        
+
         server.httpServer?.once("listening", () => {
           const actualPort = server.httpServer?.address();
           console.log(`[Vite Plugin] HTTP server listening on:`, actualPort);
-          
+
           // Small delay to ensure server is fully ready
           setTimeout(async () => {
             try {
               console.log("[Vite Plugin] Attempting to initialize WebSocket server...");
-              
+
               if (!server.httpServer) {
                 console.error("[Vite Plugin] ❌ HTTP server not available");
                 return;
@@ -78,10 +78,10 @@ export default defineConfig({
 
               // Use Vite's ssrLoadModule to properly resolve and load the module
               const websocketModule = await server.ssrLoadModule("/app/routes/websocket.server.ts");
-              
+
               console.log("[Vite Plugin] Module loaded:", !!websocketModule);
               console.log("[Vite Plugin] setupWebSocketServer exists:", !!websocketModule.setupWebSocketServer);
-              
+
               if (websocketModule.setupWebSocketServer) {
                 websocketModule.setupWebSocketServer(server.httpServer!);
                 const address = server.httpServer.address();

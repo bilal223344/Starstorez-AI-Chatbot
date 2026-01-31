@@ -5,7 +5,12 @@
   {{ block.shopify_attributes }}
 ></div>
 
-<script src="{{ 'script.js' | asset_url }}" defer></script>
+<script src="{{ 'script.js' | asset_url }}" defer>
+
+window.shopName = Shopify.shop;
+window.customerEmail = "{{ customer.email | escape }}";
+
+</script>
 {{ 'style.css' | asset_url | stylesheet_tag }}
 
 {% schema %}

@@ -65,7 +65,7 @@ export const syncAllOrders = async (shop: string, accessToken: string) => {
         // Process Batch
         await Promise.all(nodes.map(async (node: ShopifyOrderNode) => {
             // A. Save to DB
-            const formatted = formatShopifyOrder(node);
+            const formatted = formatShopifyOrder(node, shop);
             const savedOrder = await saveOrderToDB(formatted);
 
             // B. Prepare for Pinecone
@@ -111,7 +111,7 @@ export const syncOrderById = async (shop: string, accessToken: string, orderId: 
     }
 
     // 1. Save to DB
-    const savedOrder = await saveOrderToDB(formatShopifyOrder(orderNode));
+    const savedOrder = await saveOrderToDB(formatShopifyOrder(orderNode, shop));
 
     // 2. Sync to Pinecone
     const nsCheck = await checkPineconeNamespace(shop);
@@ -126,7 +126,7 @@ export const syncOrderById = async (shop: string, accessToken: string, orderId: 
         const record: PineconeRecord = {
             id: `shopify_${orderId.split("/").pop()}`,
             values: vectors[0],
-            metadata: metadata 
+            metadata: metadata
         };
 
         // Upsert Single Vector
@@ -136,7 +136,7 @@ export const syncOrderById = async (shop: string, accessToken: string, orderId: 
 };
 
 // --- Formatter ---
-export const formatShopifyOrder = (node: ShopifyOrderNode): FormattedOrderData => {
+export const formatShopifyOrder = (node: ShopifyOrderNode, shop: string): FormattedOrderData & { shop: string } => {
     const rawItems = node.lineItems.edges.map(e => e.node);
 
     return {
@@ -155,13 +155,14 @@ export const formatShopifyOrder = (node: ShopifyOrderNode): FormattedOrderData =
             }))
         },
         // We pass the raw customer to handle the relationship in the DB function
-        _customerPayload: node.customer
+        _customerPayload: node.customer,
+        shop: shop // Pass shop down
     };
 };
 
 // --- DB Actions ---
-export const saveOrderToDB = async (formattedData: FormattedOrderData) => {
-    const { _customerPayload, items, ...orderData } = formattedData;
+export const saveOrderToDB = async (formattedData: FormattedOrderData & { shop: string }) => {
+    const { _customerPayload, items, shop, ...orderData } = formattedData;
 
     try {
         return await prisma.order.upsert({
@@ -175,9 +176,9 @@ export const saveOrderToDB = async (formattedData: FormattedOrderData) => {
                         create: {
                             shopifyId: _customerPayload.id,
                             email: _customerPayload.email,
-                            firstName: _customerPayload.firstName,
                             lastName: _customerPayload.lastName,
-                            source: "SHOPIFY"
+                            source: "SHOPIFY",
+                            shop: shop
                         }
                     }
                 }
