@@ -258,7 +258,7 @@ export default function ChatbotPreview({ data }: ChatbotPreviewProps) {
             {/* --- CHAT WINDOW CONTAINER --- */}
             {isChatOpen && (
                 <div style={{
-                    position: "fixed",
+                    position: "absolute",
                     bottom: `${position.marginBottom + btnSize.size + 20}px`,
                     [position.chatButtonPosition === "Left corner" ? "left" : "right"]: `${position.marginRight}px`,
                     width: `${chatWindow.width}px`,
