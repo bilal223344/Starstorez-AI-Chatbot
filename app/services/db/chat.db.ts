@@ -58,10 +58,10 @@ export async function saveChatTurn(
                 messageId: assistantMsg.id,
                 productProdId: p.id,
                 title: p.title,
-                price: p.price,
+                price: (typeof p.price === 'number' && !isNaN(p.price)) ? p.price : 0,
                 handle: p.handle,
-                image: p.image,
-                score: p.score
+                image: p.image || "",
+                score: p.score || 0
             }))
         });
     }

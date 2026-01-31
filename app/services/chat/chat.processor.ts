@@ -49,12 +49,12 @@ export async function processChat(
             );
             // Map results
             productsFound = searchResult.matches.map(m => ({
-                id: String(m.metadata.product_id),
-                title: String(m.metadata.title),
-                price: Number(m.metadata.price),
-                handle: String(m.metadata.handle),
-                image: String(m.metadata.image),
-                score: m.score
+                id: String(m.metadata?.product_id || m.id),
+                title: String(m.metadata?.title || ""),
+                price: parseFloat(String(m.metadata?.price || "0")),
+                handle: String(m.metadata?.handle || ""),
+                image: String(m.metadata?.image || ""),
+                score: m.score || 0
             }));
 
             // 5. Second AI Pass (with products)
