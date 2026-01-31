@@ -49,6 +49,7 @@ export async function searchPinecone(
         if (!response.ok) throw new Error(`Pinecone API Error: ${response.statusText}`);
 
         const data = await response.json();
+        console.dir(data, { depth: null });
         let matches = (data.matches || []) as PineconeMatch[];
         debug.pineconeMatches = matches.length;
 

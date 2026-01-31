@@ -1,32 +1,67 @@
-import { setupWebSocketServer } from "./routes/websocket.server";
-import type { Server } from "http";
+import { createRequestHandler } from "@react-router/express";
+import compression from "compression";
+import express from "express";
+import morgan from "morgan";
+import { createServer } from "http";
+// IMPORTANT: Adjust this path to match where your websocket.server.ts is located.
+// Based on your logs, it seems to be in app/routes/ or app/services/
+import { setupWebSocketServer } from "app/websocket.server";
 
-// Global variable to track if WebSocket is initialized
-let wsInitialized = false;
+const app = express();
+const httpServer = createServer(app);
 
-/**
- * Initialize WebSocket server for React Router app
- * Call this function when your HTTP server starts
- */
-export function initializeWebSocketServer(server: Server) {
-  if (wsInitialized) {
-    console.log("[Server] WebSocket server already initialized");
-    return;
-  }
+// ============================================================================
+// 1. SECURITY: Fix CSP "Frame Ancestors" Error
+// ============================================================================
+// This middleware ensures Shopify can load your app in an iframe
+app.use((req, res, next) => {
+  res.setHeader(
+    "Content-Security-Policy",
+    "frame-ancestors https://*.myshopify.com https://admin.shopify.com;"
+  );
+  next();
+});
 
-  try {
-    setupWebSocketServer(server);
-    wsInitialized = true;
-    console.log("[Server] ✅ WebSocket server initialized successfully");
-  } catch (error) {
-    console.error("[Server] ❌ Failed to initialize WebSocket server:", error);
-  }
-}
+// ============================================================================
+// 2. WEBSOCKETS: Initialize Server
+// ============================================================================
+// We pass the raw HTTP server instance so it can handle the "upgrade" protocol
+setupWebSocketServer(httpServer);
 
-// Auto-initialize if server is available (for development)
-if (typeof global !== "undefined") {
-  const globalServer = (global as { httpServer?: Server }).httpServer;
-  if (globalServer && !wsInitialized) {
-    initializeWebSocketServer(globalServer);
-  }
-}
+// ============================================================================
+// 3. STANDARD MIDDLEWARE
+// ============================================================================
+app.use(compression());
+app.disable("x-powered-by");
+app.use(morgan("tiny"));
+
+// Serve Static Assets (Cache Control)
+app.use(
+  "/assets",
+  express.static("build/client/assets", { immutable: true, maxAge: "1y" })
+);
+app.use(express.static("build/client", { maxAge: "1h" }));
+
+// ============================================================================
+// 4. REACT ROUTER HANDLER
+// ============================================================================
+// Dynamically import the server build to avoid issues during development
+const build = await import("./build/server/index.js");
+
+app.all(
+  "*",
+  createRequestHandler({
+    build: build as any,
+    mode: process.env.NODE_ENV,
+  })
+);
+
+// ============================================================================
+// 5. START SERVER
+// ============================================================================
+const port = process.env.PORT || 3000;
+
+httpServer.listen(port, () => {
+  console.log(`✅ Express server listening on http://localhost:${port}`);
+  console.log(`✅ WebSocket server ready at /ws/chat`);
+});

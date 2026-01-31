@@ -223,6 +223,7 @@ const prepareProductForPinecone = (product: ShopifyProductNode) => {
         type: "PRODUCT",
         product_id: product.id,
         title: product.title,
+        image: product.featuredImage?.url,
         vendor: product.vendor,
         handle: product.handle,
         price_val: minPrice,

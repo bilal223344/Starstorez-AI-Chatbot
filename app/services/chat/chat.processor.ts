@@ -47,11 +47,12 @@ export async function processChat(
                 args.max_price,
                 args.sort
             );
+            searchResult.matches.map(m => console.log("[PINECONE RESULT]", m))
             // Map results
             productsFound = searchResult.matches.map(m => ({
                 id: String(m.metadata?.product_id || m.id),
                 title: String(m.metadata?.title || ""),
-                price: parseFloat(String(m.metadata?.price || "0")),
+                price: parseFloat(String(m.metadata?.price_val || "0")),
                 handle: String(m.metadata?.handle || ""),
                 image: String(m.metadata?.image || ""),
                 score: m.score || 0
