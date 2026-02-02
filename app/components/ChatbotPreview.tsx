@@ -247,7 +247,7 @@ export default function ChatbotPreview({ data }: ChatbotPreviewProps) {
     return (
         <div style={{
             width: "100%",
-            height: `${chatWindow.height + 75}px`,
+            height: `${chatWindow.height + 160}px`,
             backgroundColor: "#e5e5e5",
             position: "relative",
             borderRadius: "12px",

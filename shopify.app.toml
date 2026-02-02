@@ -24,6 +24,14 @@ api_version = "2026-04"
   topics = [ "products/create", "products/delete", "products/update" ]
   uri = "https://chatbot.startstorez.com/api/webhooks"
 
+  [[webhooks.subscriptions]]
+  uri = "https://chatbot.startstorez.com/webhooks"
+  compliance_topics = [
+    "customers/data_request",
+    "customers/redact",
+    "shop/redact",
+  ]
+
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 scopes = "read_customers,read_orders,read_products,write_products,read_themes"

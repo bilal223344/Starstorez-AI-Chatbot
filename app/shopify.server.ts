@@ -6,6 +6,8 @@ import {
 } from "@shopify/shopify-app-react-router/server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 import prisma from "./db.server";
+import { DEFAULT_CHATBOT_SETTINGS } from "./utils/defaultCustomizer";
+import { Prisma } from "@prisma/client";
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
@@ -27,9 +29,25 @@ const shopify = shopifyApp({
       if (session.accessToken) {
         console.log(`[Install] Starting background sync for ${session.shop}`);
         // Run without awaiting to avoid blocking the auth callback
-        performInitialSync(session.shop, session.accessToken).catch(err => {
+        performInitialSync(session.shop, session.accessToken).catch((err) => {
           console.error(`[Install Error] Sync failed for ${session.shop}`, err);
         });
+      }
+
+      try {
+        console.log(`[Install] Seeding default customization settings...`);
+
+        await prisma.chatbotCustomization.upsert({
+          where: { shop: session.shop },
+          update: {},
+          create: {
+            shop: session.shop,
+            settings: DEFAULT_CHATBOT_SETTINGS as unknown as Prisma.InputJsonValue,
+          },
+        });
+        console.log(`[Install] Default settings saved successfully.`);
+      } catch (error) {
+        console.error(`[Install Error] Failed to seed settings:`, error);
       }
     },
   },
