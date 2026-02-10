@@ -21,7 +21,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             // --- PRODUCTS ---
             case "PRODUCTS_CREATE":
             case "PRODUCTS_UPDATE":
-                if (gid) await syncSingleProductJob(shop, session.accessToken!, gid);
+                {
+                    const gid = payload.admin_graphql_api_id || `gid://shopify/Product/${payload.id}`;
+                    if (gid) await syncSingleProductJob(shop, session.accessToken!, gid);
+                }
                 break;
             case "PRODUCTS_DELETE":
                 if (payload.id) await deleteProductJob(shop, `gid://shopify/Product/${payload.id}`);
@@ -30,7 +33,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             // --- ORDERS ---
             case "ORDERS_CREATE":
             case "ORDERS_UPDATED": // Note: Shopify topic is UPDATED, not UPDATE
-                if (gid) await syncOrderJob(shop, session.accessToken!, gid);
+                {
+                    const gid = payload.admin_graphql_api_id || `gid://shopify/Order/${payload.id}`;
+                    if (gid) await syncOrderJob(shop, session.accessToken!, gid);
+                }
                 break;
             case "ORDERS_DELETE":
                 if (payload.id) await deleteOrderFromDB(`gid://shopify/Order/${payload.id}`);
@@ -40,7 +46,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             // --- CUSTOMERS ---
             case "CUSTOMERS_CREATE":
             case "CUSTOMERS_UPDATE":
-                if (gid) await syncCustomerJob(shop, session.accessToken!, gid);
+                {
+                    const gid = payload.admin_graphql_api_id || `gid://shopify/Customer/${payload.id}`;
+                    if (gid) await syncCustomerJob(shop, session.accessToken!, gid);
+                }
                 break;
             case "CUSTOMERS_DELETE":
                 if (payload.id) await deleteCustomerFromDB(`gid://shopify/Customer/${payload.id}`);

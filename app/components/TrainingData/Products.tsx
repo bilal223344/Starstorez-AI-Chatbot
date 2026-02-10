@@ -1,8 +1,9 @@
 import { CircleQuestionMark, StickyNote } from "lucide-react";
+import { CallbackEvent } from "@shopify/polaris-types";
 import { useState, useEffect } from "react";
-import { useFetcher, useSubmit } from "react-router";
+import { useFetcher } from "react-router";
 
-declare const shopify: any;
+
 
 interface Product {
     id: number;
@@ -22,38 +23,29 @@ interface FAQ {
     answer: string;
 }
 
-export default function Products() {
-    const loader = useFetcher<{ tab: string; products: Product[] }>();
-    const submit = useSubmit();
+interface WindowWithShopify extends Window {
+    shopify?: {
+        intents?: {
+            invoke?: (intent: string, payload: Record<string, unknown>) => void;
+        };
+    };
+}
 
-    const [products, setProducts] = useState<Product[]>([]);
+export default function Products({ products: initialProducts }: { products: Product[] }) {
+    const fetcher = useFetcher();
+
+    const [products, setProducts] = useState<Product[]>(initialProducts);
     const [activeProduct, setActiveProduct] = useState<Product | null>(null);
     const [searchTerm, setSearchTerm] = useState("");
     const [newQuestion, setNewQuestion] = useState("");
     const [newAnswer, setNewAnswer] = useState("");
 
-    // Self-load on mount
+    // Sync fetched data into local state when prop changes
     useEffect(() => {
-        if (loader.state === "idle" && !loader.data) {
-            loader.load("/app/trainingdata?tab=products");
-        }
-    }, []);
+        setProducts(initialProducts);
+    }, [initialProducts]);
 
-    // Sync fetched data into local state
-    useEffect(() => {
-        if (loader.data?.products) {
-            setProducts(loader.data.products);
-        }
-    }, [loader.data]);
 
-    // Loading state
-    if (loader.state === "loading" || !loader.data) {
-        return (
-            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", padding: "60px 0" }}>
-                <s-spinner size="large"></s-spinner>
-            </div>
-        );
-    }
 
     const filteredProducts = products.filter(p =>
         p.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -72,10 +64,10 @@ export default function Products() {
         formData.append("productId", activeProduct.id.toString());
         formData.append("question", newQuestion);
         formData.append("answer", newAnswer);
-        submit(formData, { method: "post" });
+        fetcher.submit(formData, { method: "post" });
 
         // Optimistic update
-        const tempId = `temp-${Date.now()}`;
+        const tempId = `temp - ${Date.now()} `;
         const newFaqItem: FAQ = { id: tempId, question: newQuestion, answer: newAnswer };
         setProducts(prev => prev.map(p =>
             p.id === activeProduct.id ? { ...p, faqs: [...p.faqs, newFaqItem] } : p
@@ -90,7 +82,7 @@ export default function Products() {
         const formData = new FormData();
         formData.append("intent", "deleteFaq");
         formData.append("faqId", faqId);
-        submit(formData, { method: "post" });
+        fetcher.submit(formData, { method: "post" });
 
         // Optimistic update
         setProducts(prev => prev.map(p =>
@@ -131,7 +123,7 @@ export default function Products() {
                             <s-search-field
                                 placeholder="Search products..."
                                 value={searchTerm}
-                                onInput={(e: any) => setSearchTerm(e.target.value)}
+                                onInput={(e: CallbackEvent<"s-search-field">) => setSearchTerm(e.currentTarget.value)}
                             />
 
                             {/* Filter Button + Popover */}
@@ -211,11 +203,11 @@ export default function Products() {
                                     </s-stack>
                                 </s-table-cell>
                                 <s-table-cell>
-                                    <s-stack direction="inline" gap="small-100" style={{ flexWrap: "wrap" }}>
+                                    <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
                                         {product.tags && product.tags.map((tag: string, i: number) => (
                                             <s-chip key={i}>{tag}</s-chip>
                                         ))}
-                                    </s-stack>
+                                    </div>
                                 </s-table-cell>
                                 <s-table-cell>
                                     <s-button
@@ -231,7 +223,7 @@ export default function Products() {
                                     </s-button>
                                 </s-table-cell>
                                 <s-table-cell>
-                                    <s-button onClick={() => shopify.intents.invoke?.("edit:shopify/Product", { id: product.id })} variant="tertiary">Edit</s-button>
+                                    <s-button onClick={() => (window as unknown as WindowWithShopify).shopify?.intents?.invoke?.("edit:shopify/Product", { id: product.id })} variant="tertiary">Edit</s-button>
                                 </s-table-cell>
                             </s-table-row>
                         ))}
@@ -315,7 +307,7 @@ export default function Products() {
                         label="Question"
                         required
                         value={newQuestion}
-                        onInput={(e: any) => setNewQuestion(e.target.value)}
+                        onInput={(e: CallbackEvent<"s-text-field">) => setNewQuestion(e.currentTarget.value)}
                     />
                     <s-text-area
                         placeholder="Provide a clear, concise answer to the question."
@@ -323,7 +315,7 @@ export default function Products() {
                         rows={4}
                         required
                         value={newAnswer}
-                        onInput={(e: any) => setNewAnswer(e.target.value)}
+                        onInput={(e: CallbackEvent<"s-text-area">) => setNewAnswer(e.currentTarget.value)}
                     />
                 </s-stack>
 

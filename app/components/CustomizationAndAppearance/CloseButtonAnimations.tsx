@@ -41,7 +41,8 @@ export default function CloseButtonAnimations({ data, onUpdate }: CloseButtonAni
                                     <s-heading>Close Animation</s-heading>
 
                                     <s-box padding="small" border="base base dashed" borderRadius="base" background="subdued">
-                                        <s-stack direction="inline" gap="small" flexWrap="wrap">
+                                        {/* @ts-ignore */}
+                                        <s-stack direction="inline" gap="small" wrap="wrap">
 
                                             {/* 1. Fade Out */}
                                             <button
@@ -54,12 +55,12 @@ export default function CloseButtonAnimations({ data, onUpdate }: CloseButtonAni
                                                     display: "flex", justifyContent: "center", alignItems: "center",
                                                     background: "white", transition: "all 0.2s ease"
                                                 }}>
-                                                    <div style={{ 
-                                                        height: "60px", width: "200px", 
-                                                        background: "linear-gradient(135deg, #D73535, #000851)", 
-                                                        borderRadius: "12px", 
-                                                        display: "flex", 
-                                                        justifyContent: "center", 
+                                                    <div style={{
+                                                        height: "60px", width: "200px",
+                                                        background: "linear-gradient(135deg, #D73535, #000851)",
+                                                        borderRadius: "12px",
+                                                        display: "flex",
+                                                        justifyContent: "center",
                                                         alignItems: "center",
                                                         opacity: 0.5
                                                     }}>
@@ -82,12 +83,12 @@ export default function CloseButtonAnimations({ data, onUpdate }: CloseButtonAni
                                                     background: "white",
                                                     overflow: "hidden"
                                                 }}>
-                                                    <div style={{ 
-                                                        height: "60px", width: "200px", 
-                                                        background: "linear-gradient(135deg, #D73535, #000851)", 
-                                                        borderRadius: "12px", 
-                                                        display: "flex", 
-                                                        justifyContent: "center", 
+                                                    <div style={{
+                                                        height: "60px", width: "200px",
+                                                        background: "linear-gradient(135deg, #D73535, #000851)",
+                                                        borderRadius: "12px",
+                                                        display: "flex",
+                                                        justifyContent: "center",
                                                         alignItems: "center",
                                                         marginBottom: "-20px"
                                                     }}>
@@ -110,12 +111,12 @@ export default function CloseButtonAnimations({ data, onUpdate }: CloseButtonAni
                                                     background: "white",
                                                     overflow: "hidden"
                                                 }}>
-                                                    <div style={{ 
-                                                        height: "60px", width: "200px", 
-                                                        background: "linear-gradient(135deg, #D73535, #000851)", 
-                                                        borderRadius: "12px", 
-                                                        display: "flex", 
-                                                        justifyContent: "center", 
+                                                    <div style={{
+                                                        height: "60px", width: "200px",
+                                                        background: "linear-gradient(135deg, #D73535, #000851)",
+                                                        borderRadius: "12px",
+                                                        display: "flex",
+                                                        justifyContent: "center",
                                                         alignItems: "center",
                                                         marginTop: "-20px"
                                                     }}>
@@ -137,12 +138,12 @@ export default function CloseButtonAnimations({ data, onUpdate }: CloseButtonAni
                                                     display: "flex", justifyContent: "center", alignItems: "center",
                                                     background: "white"
                                                 }}>
-                                                    <div style={{ 
-                                                        height: "40px", width: "150px", 
-                                                        background: "linear-gradient(135deg, #D73535, #000851)", 
-                                                        borderRadius: "12px", 
-                                                        display: "flex", 
-                                                        justifyContent: "center", 
+                                                    <div style={{
+                                                        height: "40px", width: "150px",
+                                                        background: "linear-gradient(135deg, #D73535, #000851)",
+                                                        borderRadius: "12px",
+                                                        display: "flex",
+                                                        justifyContent: "center",
                                                         alignItems: "center",
                                                         transform: "scale(0.7)"
                                                     }}>
@@ -164,12 +165,12 @@ export default function CloseButtonAnimations({ data, onUpdate }: CloseButtonAni
                                                     display: "flex", justifyContent: "center", alignItems: "center",
                                                     background: "white"
                                                 }}>
-                                                    <div style={{ 
-                                                        height: "60px", width: "200px", 
-                                                        background: "linear-gradient(135deg, #D73535, #000851)", 
-                                                        borderRadius: "12px", 
-                                                        display: "flex", 
-                                                        justifyContent: "center", 
+                                                    <div style={{
+                                                        height: "60px", width: "200px",
+                                                        background: "linear-gradient(135deg, #D73535, #000851)",
+                                                        borderRadius: "12px",
+                                                        display: "flex",
+                                                        justifyContent: "center",
                                                         alignItems: "center",
                                                         transform: "rotate(15deg)",
                                                         opacity: 0.7
@@ -192,12 +193,12 @@ export default function CloseButtonAnimations({ data, onUpdate }: CloseButtonAni
                                                     display: "flex", justifyContent: "center", alignItems: "center",
                                                     background: "white"
                                                 }}>
-                                                    <div style={{ 
-                                                        height: "60px", width: "200px", 
-                                                        background: "linear-gradient(135deg, #D73535, #000851)", 
-                                                        borderRadius: "12px", 
-                                                        display: "flex", 
-                                                        justifyContent: "center", 
+                                                    <div style={{
+                                                        height: "60px", width: "200px",
+                                                        background: "linear-gradient(135deg, #D73535, #000851)",
+                                                        borderRadius: "12px",
+                                                        display: "flex",
+                                                        justifyContent: "center",
                                                         alignItems: "center"
                                                     }}>
                                                         <span style={{ color: "white", fontSize: "12px" }}>Chat Window</span>

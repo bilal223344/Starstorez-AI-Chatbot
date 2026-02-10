@@ -1,4 +1,3 @@
-import { CallbackEvent } from "@shopify/polaris-types";
 import React, { useState } from "react";
 
 export interface ResponseSettingsData {
@@ -14,11 +13,11 @@ interface ResponseSettingsProps {
 export function ResponseSettings({ data, setData }: ResponseSettingsProps) {
     const [isOpen, setIsOpen] = useState(false);
 
-    const handleLengthChange = (event: CallbackEvent<"s-choice-list">) => {
+    const handleLengthChange = (event: any) => {
         setData(prev => ({ ...prev, length: event.currentTarget.values }));
     };
 
-    const handleStyleChange = (event: CallbackEvent<"s-choice-list">) => {
+    const handleStyleChange = (event: any) => {
         setData(prev => ({ ...prev, style: event.currentTarget.values }));
     };
 
@@ -29,10 +28,10 @@ export function ResponseSettings({ data, setData }: ResponseSettingsProps) {
                     <div style={{ flex: "1", display: "flex", alignItems: "center", gap: "0.3em" }}>
                         <s-heading><span style={{ fontSize: "1.1em", fontWeight: 600 }}>Response Settings</span></s-heading>
                         <s-tooltip id="resp-tooltip">
-                           Configure length and styling of AI responses.
+                            Configure length and styling of AI responses.
                         </s-tooltip>
                         {/* <div onClick={(e) => e.stopPropagation()}> */}
-                            <s-icon interestFor="resp-tooltip" type="info"></s-icon>
+                        <s-icon interestFor="resp-tooltip" type="info"></s-icon>
                         {/* </div> */}
                     </div>
                     <s-icon type={isOpen ? "chevron-up" : "chevron-down"} />
@@ -44,13 +43,13 @@ export function ResponseSettings({ data, setData }: ResponseSettingsProps) {
                     <s-divider />
                     <s-stack padding="none base base" gap="base">
                         <s-grid gridTemplateColumns="1fr 1fr" gap="small-200">
-                            
+
                             {/* Response Length */}
                             <s-box border="base base dashed" borderRadius="base" background="subdued" padding="base">
                                 <s-choice-list
                                     label="Response Length"
                                     name="response-length"
-                                    value={data.length}
+                                    {...{ selected: data.length } as any}
                                     onChange={handleLengthChange}
                                 >
                                     <s-choice value="concise">Concise</s-choice>
@@ -64,11 +63,27 @@ export function ResponseSettings({ data, setData }: ResponseSettingsProps) {
                                 <s-choice-list
                                     label="Response Style"
                                     name="response-style"
-                                    value={data.style}
+                                    {...{ selected: data.style } as any}
                                     onChange={handleStyleChange}
                                 >
                                     <s-choice value="emojis">Use Emojis 😊</s-choice>
                                     <s-choice value="bullets">Use Bullet Points</s-choice>
+                                </s-choice-list>
+                            </s-box>
+
+                            {/* Response Tone (New section based on instruction) */}
+                            <s-box border="base base dashed" borderRadius="base" background="subdued" padding="base">
+                                <s-choice-list
+                                    label="Response Tone"
+                                    name="tone-selection"
+                                    // @ts-ignore
+                                    selected={data.tone}
+                                    // @ts-ignore
+                                    onChange={handleToneChange}
+                                >
+                                    <s-choice value="friendly">Friendly</s-choice>
+                                    <s-choice value="professional">Professional</s-choice>
+                                    <s-choice value="casual">Casual</s-choice>
                                 </s-choice-list>
                             </s-box>
 

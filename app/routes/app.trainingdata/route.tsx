@@ -1,7 +1,6 @@
-import { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
+import { LoaderFunctionArgs, ActionFunctionArgs, useLoaderData, useSearchParams, Link } from "react-router";
 import { authenticate } from "app/shopify.server";
 import prisma from "app/db.server";
-import { useState } from "react";
 import Discount from "app/components/TrainingData/Discount";
 import Policies from "app/components/TrainingData/Policies";
 import Products from "app/components/TrainingData/Products";
@@ -11,26 +10,14 @@ import { Database } from "lucide-react";
 import FAQs from "app/components/TrainingData/FAQs";
 
 // --- LOADER ---
-// Uses ?tab=X query param for lazy loading: each tab fetches only its own data.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
     const { admin, session } = await authenticate.admin(request);
     const shop = session.shop;
     const url = new URL(request.url);
-    const tab = url.searchParams.get("tab");
+    const tab = url.searchParams.get("tab") || "products";
 
-    // --- TAB-SPECIFIC DATA LOADING ---
-
-    if (tab === "products") {
-        const products = await prisma.product.findMany({
-            where: { shop },
-            include: { faqs: true },
-            orderBy: { title: 'asc' }
-        });
-        return Response.json({ tab: "products", products });
-    }
-
-    if (tab === "discounts") {
-        // Fetch scopes to check for read_discounts
+    // Helper for Discounts Access Scopes
+    const getDiscountData = async () => {
         let hasScope = false;
         try {
             const scopesResponse = await admin.graphql(`
@@ -48,11 +35,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             where: { shop },
             orderBy: { createdAt: 'desc' }
         });
-        return Response.json({ tab: "discounts", discounts, hasDiscountScope: hasScope });
-    }
+        return { discounts, hasDiscountScope: hasScope };
+    };
 
-    if (tab === "policies") {
-        // Fetch scopes to check for read/write_legal_policies
+    // Helper for Policies
+    const getPolicyData = async () => {
         let hasScope = false;
         let currentScopes = "";
         try {
@@ -103,12 +90,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                 }
             }
         }
+        return { policies, hasScope };
+    };
 
-        return Response.json({ tab: "policies", policies, hasScope });
-    }
-
-    if (tab === "faqs") {
-        // Auto-seed defaults on first visit
+    // Helper for FAQs
+    const getFaqData = async () => {
         const faqCount = await prisma.fAQ.count({ where: { shop } });
         if (faqCount === 0) {
             await prisma.fAQ.createMany({
@@ -144,27 +130,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                 ],
             });
         }
-
-        const faqs = await prisma.fAQ.findMany({
+        return await prisma.fAQ.findMany({
             where: { shop },
             orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }]
         });
-        return Response.json({ tab: "faqs", faqs });
-    }
+    };
 
-    if (tab === "recommendations") {
-        const campaigns = await prisma.campaign.findMany({
-            where: { shop },
-            include: { products: true }
-        });
-        const products = await prisma.product.findMany({
-            where: { shop },
-            orderBy: { title: 'asc' }
-        });
-        return Response.json({ tab: "recommendations", campaigns, products });
-    }
-
-    if (tab === "profile") {
+    // Helper for Profile
+    const getProfileData = async () => {
         let brandProfile = {};
         try {
             const response = await admin.graphql(`
@@ -188,11 +161,36 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         } catch (e) {
             console.error("Failed to fetch brand metafields", e);
         }
-        return Response.json({ tab: "profile", brandProfile });
-    }
+        return brandProfile;
+    };
 
-    // Default: no tab param → initial page load, return only shop
-    return Response.json({ shop });
+    // Helper for Recommendations
+    const getRecommendationsData = async () => {
+        const campaigns = await prisma.campaign.findMany({
+            where: { shop },
+            include: { products: true }
+        });
+        const products = await prisma.product.findMany({
+            where: { shop },
+            orderBy: { title: 'asc' }
+        });
+        return { campaigns, products };
+    };
+
+    // --- DEFER ---
+    // We only trigger the Promise for the ACTIVE tab. Others are null.
+
+    return {
+        shop,
+        products: tab === "products" ? await prisma.product.findMany({ where: { shop }, include: { faqs: true }, orderBy: { title: 'asc' } }) : null,
+        discounts: tab === "discounts" ? await getDiscountData() : null,
+        policies: tab === "policies" ? await getPolicyData() : null,
+        faqs: tab === "faqs" ? await getFaqData() : null,
+        recommendations: tab === "recommendations" ? await getRecommendationsData() : null,
+        profile: tab === "profile" ? await getProfileData() : null,
+        activeTab: tab
+    };
+    /* Using 'await' because 'defer' was removed. This loads data for the active tab before rendering. */
 };
 
 // --- ACTION ---
@@ -579,7 +577,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                     userErrors {
                         field
                         message
-                    }
+                        }
                 }
             }`, {
                 variables: {
@@ -610,7 +608,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                     userErrors {
                         field
                         message
-                    }
+                        }
                 }
             }`, {
                 variables: {
@@ -642,24 +640,40 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 
 export default function TrainingData() {
-    const [activeTab, setActiveTab] = useState("products");
+    const loaderData = useLoaderData<typeof loader>();
+    const [searchParams] = useSearchParams();
+    const activeTab = searchParams.get("tab") || "products";
 
     const renderContent = () => {
         switch (activeTab) {
             case "products":
-                return <Products />;
+                if (!loaderData.products) return null;
+                // @ts-expect-error - products prop type mismatch
+                return <Products products={loaderData.products || []} />;
             case "discounts":
-                return <Discount />;
+                if (!loaderData.discounts) return null;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                return <Discount discounts={(loaderData.discounts as any)?.discounts || []} />;
             case "policies":
-                return <Policies />;
+                if (!loaderData.policies) return null;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                return <Policies policies={(loaderData.policies as any)?.policies || []} hasScope={(loaderData.policies as any)?.hasScope || false} />;
             case "recommendations":
-                return <ProductRecommendations />;
+                if (!loaderData.recommendations) return null;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                return <ProductRecommendations campaigns={(loaderData.recommendations as any)?.campaigns || []} products={(loaderData.recommendations as any)?.products || []} />;
             case "profile":
-                return <Profile />;
+                if (!loaderData.profile) return null;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                return <Profile brandProfile={loaderData.profile as any || {}} />;
             case "faqs":
-                return <FAQs />;
+                if (!loaderData.faqs) return null;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                return <FAQs faqs={loaderData.faqs as any || []} />;
             default:
-                return <Products />;
+                if (!loaderData.products) return null;
+                // @ts-expect-error - products prop type mismatch due to serialization
+                return <Products products={loaderData.products || []} />;
         }
     };
 
@@ -685,21 +699,39 @@ export default function TrainingData() {
                         </s-stack>
                     </s-stack>
 
-                    {/* Tabs */}
+                    {/* Tabs using Links for instant navigation */}
                     <s-grid gridTemplateColumns="1fr 1fr 1fr" border="base" borderWidth="base none none none" paddingBlockStart="base">
                         <s-stack direction="inline" justifyContent="center" gap="large">
-                            <s-button icon="package" onClick={() => setActiveTab("products")} pressed={activeTab === "products"}>Products</s-button>
-                            <s-button icon="discount" onClick={() => setActiveTab("discounts")} pressed={activeTab === "discounts"}>Discount</s-button>
-                            <s-button icon="globe-lines" onClick={() => setActiveTab("market")} disabled>Market</s-button>
+                            <Link to="?tab=products" preventScrollReset>
+                                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                                <s-button icon="package" {...{ pressed: activeTab === "products" } as any}>Products</s-button>
+                            </Link>
+                            <Link to="?tab=discounts" preventScrollReset>
+                                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                                <s-button icon="discount" {...{ pressed: activeTab === "discounts" } as any}>Discount</s-button>
+                            </Link>
+                            <s-button icon="globe-lines" disabled>Market</s-button>
                         </s-stack>
                         <s-stack border="base" borderWidth="none base none base" borderColor="strong" direction="inline" justifyContent="center" gap="large">
-                            <s-button icon="info" onClick={() => setActiveTab("faqs")} pressed={activeTab === "faqs"}>FAQs</s-button>
-                            <s-button icon="shield-check-mark" onClick={() => setActiveTab("policies")} pressed={activeTab === "policies"}>Policies</s-button>
-                            <s-button icon="receipt" onClick={() => setActiveTab("documents")} disabled>Documents</s-button>
+                            <Link to="?tab=faqs" preventScrollReset>
+                                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                                <s-button icon="info" {...{ pressed: activeTab === "faqs" } as any}>FAQs</s-button>
+                            </Link>
+                            <Link to="?tab=policies" preventScrollReset>
+                                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                                <s-button icon="shield-check-mark" {...{ pressed: activeTab === "policies" } as any}>Policies</s-button>
+                            </Link>
+                            <s-button icon="receipt" disabled>Documents</s-button>
                         </s-stack>
                         <s-stack direction="inline" justifyContent="center" gap="large">
-                            <s-button icon="profile" onClick={() => setActiveTab("profile")} pressed={activeTab === "profile"}>Profile</s-button>
-                            <s-button icon="star" onClick={() => setActiveTab("recommendations")} pressed={activeTab === "recommendations"}>Recommendations</s-button>
+                            <Link to="?tab=profile" preventScrollReset>
+                                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                                <s-button icon="profile" {...{ pressed: activeTab === "profile" } as any}>Profile</s-button>
+                            </Link>
+                            <Link to="?tab=recommendations" preventScrollReset>
+                                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                                <s-button icon="star" {...{ pressed: activeTab === "recommendations" } as any}>Recommendations</s-button>
+                            </Link>
                         </s-stack>
                     </s-grid>
                 </s-stack>
@@ -712,7 +744,7 @@ export default function TrainingData() {
                     <s-icon type="arrow-right" />
                     <s-text>Store Data</s-text>
                     <s-icon type="arrow-right" />
-                    <s-text style={{ textTransform: 'capitalize' }}>{activeTab}</s-text>
+                    <span style={{ textTransform: 'capitalize' }}>{activeTab}</span>
                 </s-stack>
 
                 {renderContent()}

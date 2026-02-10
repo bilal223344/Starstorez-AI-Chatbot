@@ -1,3 +1,4 @@
+
 import { CircleCheckBig, FileText, Lock } from "lucide-react";
 import { useFetcher } from "react-router";
 import { useState, useEffect } from "react";
@@ -36,7 +37,7 @@ function PolicyCard({
 }) {
     const fetcher = useFetcher();
     const [isEditing, setIsEditing] = useState(false);
-    const [body, setBody] = useState(policy?.body || "");
+    const [body, setBody] = useState<string>(policy?.body || "");
     const isSaving = fetcher.state !== "idle";
 
     useEffect(() => {
@@ -77,6 +78,7 @@ function PolicyCard({
             <s-text-area
                 placeholder={placeholder}
                 value={body}
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 onInput={(e: any) => setBody(e.target.value)}
                 rows={10}
                 disabled={!isEditing}
@@ -103,43 +105,21 @@ function PolicyCard({
 }
 
 // --- Main Component ---
-export default function Policies() {
-    const loader = useFetcher<{ tab: string; policies: PolicyNode[]; hasScope: boolean }>();
+export default function Policies({ policies: initialPolicies, hasScope: initialHasScope }: { policies: PolicyNode[], hasScope: boolean }) {
     const fetcher = useFetcher();
 
-    const [policies, setPolicies] = useState<PolicyNode[]>([]);
-    const [hasScope, setHasScope] = useState(false);
+    const [policies, setPolicies] = useState<PolicyNode[]>(initialPolicies);
+    const [hasScope, setHasScope] = useState(initialHasScope);
 
-    // Self-load on mount
+    // Sync props to state
     useEffect(() => {
-        if (loader.state === "idle" && !loader.data) {
-            loader.load("/app/trainingdata?tab=policies");
-        }
-    }, []);
+        setPolicies(initialPolicies);
+        setHasScope(initialHasScope);
+    }, [initialPolicies, initialHasScope]);
 
-    // Sync fetched data
-    useEffect(() => {
-        if (loader.data) {
-            if (loader.data.policies) setPolicies(loader.data.policies);
-            if (loader.data.hasScope !== undefined) setHasScope(loader.data.hasScope);
-        }
-    }, [loader.data]);
+    // Handle sync completion — parent revalidation will update props
+    // We just need to handle the editing state reset if needed, which is already handled in PolicyCard
 
-    // Handle sync completion — reload data
-    useEffect(() => {
-        if (fetcher.state === "idle" && fetcher.data) {
-            loader.load("/app/trainingdata?tab=policies");
-        }
-    }, [fetcher.state, fetcher.data]);
-
-    // Loading state
-    if (loader.state === "loading" || !loader.data) {
-        return (
-            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", padding: "60px 0" }}>
-                <s-spinner size="large"></s-spinner>
-            </div>
-        );
-    }
 
     const getPolicy = (type: string) => {
         return policies.find((p) => p.type === type);
@@ -150,7 +130,8 @@ export default function Policies() {
     };
 
     const handleRequestScope = async () => {
-        const response = await (window as any).shopify.scopes.request([
+        // @ts-ignore
+        const response = await window.shopify.scopes.request([
             "read_legal_policies",
             "write_legal_policies",
         ]);

@@ -1,4 +1,5 @@
 import { Store, CheckCircle, AlertCircle } from "lucide-react";
+import { CallbackEvent } from "@shopify/polaris-types";
 import { useFetcher } from "react-router";
 import { useState, useEffect } from "react";
 
@@ -10,39 +11,31 @@ interface BrandProfile {
     primaryDomain: string;
 }
 
-export default function Profile() {
-    const loader = useFetcher<{ tab: string; brandProfile: BrandProfile }>();
+export default function Profile({ brandProfile: initialBrandProfile }: { brandProfile: BrandProfile }) {
+    // const loader = useFetcher... -> Removed
     const fetcher = useFetcher<{ success: boolean; message: string }>();
 
     const [formData, setFormData] = useState({
-        story: "",
-        location: "",
-        website: "",
-        storeType: "online",
-        primaryDomain: "",
+        story: initialBrandProfile?.story || "",
+        location: initialBrandProfile?.location || "",
+        website: initialBrandProfile?.website || initialBrandProfile?.primaryDomain || "",
+        storeType: initialBrandProfile?.storeType || "online",
+        primaryDomain: initialBrandProfile?.primaryDomain || "",
     });
     const [notification, setNotification] = useState<{ type: string; message: string } | null>(null);
 
-    // Self-load on mount
+    // Sync props to state
     useEffect(() => {
-        if (loader.state === "idle" && !loader.data) {
-            loader.load("/app/trainingdata?tab=profile");
-        }
-    }, []);
-
-    // Sync fetched data into form
-    useEffect(() => {
-        if (loader.data?.brandProfile) {
-            const bp = loader.data.brandProfile;
+        if (initialBrandProfile) {
             setFormData({
-                story: bp.story || "",
-                location: bp.location || "",
-                website: bp.website || bp.primaryDomain || "",
-                storeType: bp.storeType || "online",
-                primaryDomain: bp.primaryDomain || "",
+                story: initialBrandProfile.story || "",
+                location: initialBrandProfile.location || "",
+                website: initialBrandProfile.website || initialBrandProfile.primaryDomain || "",
+                storeType: initialBrandProfile.storeType || "online",
+                primaryDomain: initialBrandProfile.primaryDomain || "",
             });
         }
-    }, [loader.data]);
+    }, [initialBrandProfile]);
 
     // Handle save response
     useEffect(() => {
@@ -56,14 +49,8 @@ export default function Profile() {
         }
     }, [fetcher.state, fetcher.data]);
 
-    // Loading state
-    if (loader.state === "loading" || !loader.data) {
-        return (
-            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", padding: "60px 0" }}>
-                <s-spinner size="large"></s-spinner>
-            </div>
-        );
-    }
+    // Loading state removed
+
 
     const handleSave = () => {
         fetcher.submit(
@@ -117,7 +104,7 @@ export default function Profile() {
                     placeholder="Brand Name: [Your Brand Name]\nTagline: [Your Tagline]\nBrand Voice: [e.g., Professional, Friendly, Casual, Witty]\nBrand Personality: [e.g., Modern, Traditional, Eco-conscious, Luxury]"
                     rows={5}
                     value={formData.story}
-                    onInput={(e: React.ChangeEvent<HTMLInputElement>) => setFormData({ ...formData, story: e.target.value })}
+                    onInput={(e: CallbackEvent<"s-text-area">) => setFormData({ ...formData, story: e.currentTarget.value })}
                 />
             </s-stack>
 
@@ -149,7 +136,7 @@ export default function Profile() {
                             label="Physical Location"
                             icon="location"
                             value={formData.location}
-                            onInput={(e: React.ChangeEvent<HTMLInputElement>) => setFormData({ ...formData, location: e.target.value })}
+                            onInput={(e: CallbackEvent<"s-text-field">) => setFormData({ ...formData, location: e.currentTarget.value })}
                             placeholder="e.g. 123 Main St, Los Angeles, CA"
                         />
                     )}

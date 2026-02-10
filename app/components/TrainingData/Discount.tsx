@@ -12,43 +12,22 @@ interface Discount {
     endsAt?: string | null;
 }
 
-export default function Discount() {
-    const loader = useFetcher<{ tab: string; discounts: Discount[]; hasDiscountScope: boolean }>();
+export default function Discount({ discounts: initialDiscounts }: { discounts: Discount[] }) {
     const fetcher = useFetcher();
 
-    const [discounts, setDiscounts] = useState<Discount[]>([]);
-    const [hasScope, setHasScope] = useState(false);
+    const [discounts, setDiscounts] = useState<Discount[]>(initialDiscounts);
 
-    // Self-load on mount
+    // Sync prop data
     useEffect(() => {
-        if (loader.state === "idle" && !loader.data) {
-            loader.load("/app/trainingdata?tab=discounts");
-        }
-    }, []);
-
-    // Sync fetched data
-    useEffect(() => {
-        if (loader.data) {
-            setDiscounts(loader.data.discounts || []);
-            setHasScope(loader.data.hasDiscountScope ?? false);
-        }
-    }, [loader.data]);
+        setDiscounts(initialDiscounts);
+    }, [initialDiscounts]);
 
     // Reload after sync action
-    useEffect(() => {
-        if (fetcher.state === "idle" && fetcher.data) {
-            loader.load("/app/trainingdata?tab=discounts");
-        }
-    }, [fetcher.state, fetcher.data]);
+    // Note: The parent loader revalidation should handle updating the data prop, 
+    // but explicit revalidation might be needed if using defer?
+    // Actually, useFetcher for action usually triggers revalidation of all loaders.
+    // So updated data should come down via props.
 
-    // Loading state
-    if (loader.state === "loading" || !loader.data) {
-        return (
-            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", padding: "60px 0" }}>
-                <s-spinner size="large"></s-spinner>
-            </div>
-        );
-    }
 
     const handleSync = () => {
         fetcher.submit({ intent: "syncDiscounts" }, { method: "post" });
@@ -117,7 +96,7 @@ export default function Discount() {
                                     <s-stack direction="inline" gap="small" alignItems="center">
                                         <s-checkbox id={`discount-${discount.id}-checkbox`} />
                                         <s-stack>
-                                            <s-text fontWeight="bold">{discount.title}</s-text>
+                                            <s-text><strong>{discount.title}</strong></s-text>
                                             <s-text color="subdued">{discount.code || "Automatic"}</s-text>
                                         </s-stack>
                                     </s-stack>
@@ -126,7 +105,7 @@ export default function Discount() {
                                     <s-tag>{discount.code || "AUTOMATIC"}</s-tag>
                                 </s-table-cell>
                                 <s-table-cell>
-                                    <s-badge state={discount.status === 'ACTIVE' ? 'success' : 'info'}>{discount.status}</s-badge>
+                                    <s-badge tone={discount.status === 'ACTIVE' ? 'success' : 'info'}>{discount.status}</s-badge>
                                 </s-table-cell>
                                 <s-table-cell>
                                     <s-switch

@@ -1,6 +1,7 @@
 import { Crown, Sparkles } from "lucide-react";
 import { useFetcher } from "react-router";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
+import { CallbackEvent } from "@shopify/polaris-types";
 
 // --- Types ---
 interface Product {
@@ -32,14 +33,14 @@ const SYSTEM_TRIGGERS: Record<string, string[]> = {
     "New Arrivals": ["new", "fresh", "just in", "latest"],
 };
 
-export default function ProductRecommendations() {
-    const loader = useFetcher<{ tab: string; campaigns: Campaign[]; products: Product[] }>();
+export default function ProductRecommendations({ campaigns: initialCampaigns, products: initialProducts }: { campaigns: Campaign[], products: Product[] }) {
+    // const loader = useFetcher... -> Removed
     const fetcher = useFetcher();
 
-    const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-    const [allProducts, setAllProducts] = useState<Product[]>([]);
-    const [isEditing, setIsEditing] = useState(false);
+    const [campaigns, setCampaigns] = useState<Campaign[]>(initialCampaigns);
+    const [allProducts, setAllProducts] = useState<Product[]>(initialProducts);
     const [currentCampaign, setCurrentCampaign] = useState<Partial<Campaign>>({});
+    const [isEditing, setIsEditing] = useState(false);
 
     // For product selection modal
     const [isProductModalOpen, setIsProductModalOpen] = useState(false);
@@ -48,38 +49,33 @@ export default function ProductRecommendations() {
     const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
     const [productSearchQuery, setProductSearchQuery] = useState("");
 
-    // Self-load on mount
+    // Sync props to state
     useEffect(() => {
-        if (loader.state === "idle" && !loader.data) {
-            loader.load("/app/trainingdata?tab=recommendations");
-        }
-    }, []);
+        const rawCampaigns = initialCampaigns;
+        const products = initialProducts || [];
 
-    // Sync fetched data
-    useEffect(() => {
-        if (loader.data?.campaigns) {
-            const rawCampaigns = loader.data.campaigns;
-            const products = loader.data.products || [];
+        // Map raw campaigns to include full product details in _products
+        const augmentedCampaigns = rawCampaigns.map(c => ({
+            ...c,
+            _products: c.products.map(cp => products.find(p => p.prodId === cp.productId)).filter(Boolean) as Product[]
+        }));
 
-            // Map raw campaigns to include full product details in _products
-            const augmentedCampaigns = rawCampaigns.map(c => ({
-                ...c,
-                _products: c.products.map(cp => products.find(p => p.prodId === cp.productId)).filter(Boolean) as Product[]
-            }));
-
-            setCampaigns(augmentedCampaigns);
-            setAllProducts(products);
-        }
-    }, [loader.data]);
+        setCampaigns(augmentedCampaigns);
+        setAllProducts(products);
+    }, [initialCampaigns, initialProducts]);
 
     // Handle save/action completion
     useEffect(() => {
         if (fetcher.state === "idle" && fetcher.data?.success) {
-            loader.load("/app/trainingdata?tab=recommendations");
+            // loader.load("/app/trainingdata?tab=recommendations"); // Handled by parent revalidation
             setIsEditing(false);
             setCurrentCampaign({});
         }
     }, [fetcher.state, fetcher.data]);
+
+    const filteredProductsForModal = allProducts.filter(p =>
+        !productSearchQuery || p.title.toLowerCase().includes(productSearchQuery.toLowerCase())
+    );
 
     const handleCreateNew = () => {
         setCurrentCampaign({
@@ -87,51 +83,58 @@ export default function ProductRecommendations() {
             description: "",
             isActive: true,
             triggerKeywords: [],
-            _products: [],
-            products: []
+            products: [],
+            _products: []
         });
         setIsEditing(true);
     };
 
+
+
     const handleEdit = (campaign: Campaign) => {
-        setCurrentCampaign(campaign);
+        setCurrentCampaign({ ...campaign });
         setIsEditing(true);
     };
 
     const handleConfigureSystemCampaign = (name: string) => {
-        // Find existing or create dummy for system campaign
         const existing = campaigns.find(c => c.name === name);
         if (existing) {
             handleEdit(existing);
         } else {
-            // If it doesn't exist in DB yet, create a placeholder
+            // Create a temporary state for a new system campaign
             setCurrentCampaign({
-                name,
-                description: name === "Best Sellers" ? "Automatically suggests top-selling products." : "Highlights items added in the last 30 days.",
+                name: name,
+                description: SYSTEM_CAMPAIGNS.includes(name) ? "System managed campaign" : "",
                 isActive: true,
-                triggerKeywords: SYSTEM_TRIGGERS[name],
-                _products: [],
-                products: []
+                triggerKeywords: SYSTEM_TRIGGERS[name] || [],
+                products: [],
+                _products: []
             });
             setIsEditing(true);
         }
     };
 
+    const handleDelete = (id: string) => {
+        fetcher.submit({ intent: "deleteCampaign", id }, { method: "post" });
+    };
+
+    const handleStatusToggle = (id: string, currentStatus: boolean) => {
+        fetcher.submit({ intent: "toggleCampaignStatus", id, isActive: !currentStatus }, { method: "post" });
+    };
+
     const handleAddProducts = () => {
-        // Initialize selection with current campaign products (using prodId)
-        const currentIds = new Set(currentCampaign._products?.map(p => p.prodId) || []);
-        setSelectedProductIds(currentIds);
+        // Pre-select existing products
+        const existingIds = new Set(currentCampaign._products?.map(p => p.prodId) || []);
+        setSelectedProductIds(existingIds);
         setProductSearchQuery("");
         setIsProductModalOpen(true);
     };
 
     const confirmAddProducts = () => {
-        const newProducts = allProducts.filter(p => selectedProductIds.has(p.prodId));
+        const selected = allProducts.filter(p => selectedProductIds.has(p.prodId));
         setCurrentCampaign(prev => ({
             ...prev,
-            _products: newProducts,
-            // We also update the 'products' array to match the shape expected by save
-            products: newProducts.map(p => ({ productId: p.prodId }))
+            _products: selected
         }));
         setIsProductModalOpen(false);
     };
@@ -139,59 +142,30 @@ export default function ProductRecommendations() {
     const handleRemoveProduct = (prodId: string) => {
         setCurrentCampaign(prev => ({
             ...prev,
-            _products: prev._products?.filter(p => p.prodId !== prodId) || [],
-            products: prev.products?.filter(p => p.productId !== prodId) || []
+            _products: prev._products?.filter(p => p.prodId !== prodId) || []
         }));
     };
 
-    const handleDelete = (campaignId: string) => {
-        if (confirm("Are you sure you want to delete this campaign?")) {
-            fetcher.submit({ actionType: "delete_campaign", campaignId }, { method: "post" });
-        }
-    };
-
-    const handleStatusToggle = (campaignId: string, currentStatus: boolean) => {
-        fetcher.submit({
-            actionType: "update_campaign",
-            campaignId,
-            isActive: (!currentStatus).toString()
-        }, { method: "post" });
-    };
-
     const handleSave = () => {
+        if (!currentCampaign.name) return; // Validation
+
         const productIds = currentCampaign._products?.map(p => p.prodId) || [];
 
-        const data: any = {
+        const data: Record<string, string> = {
+            intent: "saveCampaign",
             name: currentCampaign.name,
-            description: currentCampaign.description,
-            isActive: currentCampaign.isActive?.toString(),
+            description: currentCampaign.description || "",
+            isActive: currentCampaign.isActive ? "true" : "false",
             triggerKeywords: JSON.stringify(currentCampaign.triggerKeywords || []),
             productIds: JSON.stringify(productIds)
         };
 
         if (currentCampaign.id) {
-            data.actionType = "update_campaign";
-            data.campaignId = currentCampaign.id;
-        } else {
-            data.actionType = "create_campaign";
+            data.id = currentCampaign.id;
         }
 
         fetcher.submit(data, { method: "post" });
     };
-
-    // Filter products for modal
-    const filteredProductsForModal = allProducts.filter(p =>
-        !productSearchQuery || p.title.toLowerCase().includes(productSearchQuery.toLowerCase())
-    );
-
-    if (loader.state === "loading" || !loader.data) {
-        return (
-            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", padding: "60px 0" }}>
-                <s-spinner size="large"></s-spinner>
-            </div>
-        );
-    }
-
     if (isEditing) {
         return (
             <>
@@ -202,13 +176,13 @@ export default function ProductRecommendations() {
                             <s-grid gridTemplateColumns="1fr" gap="small-200">
                                 <s-text-field
                                     value={currentCampaign.name}
-                                    onInput={(e: any) => setCurrentCampaign({ ...currentCampaign, name: e.target.value })}
+                                    onInput={(e: CallbackEvent<"s-text-field">) => setCurrentCampaign({ ...currentCampaign, name: e.currentTarget.value })}
                                     placeholder="Campaign Name"
                                     disabled={SYSTEM_CAMPAIGNS.includes(currentCampaign.name || "")}
                                 />
                                 <s-text-field
                                     value={currentCampaign.description}
-                                    onInput={(e: any) => setCurrentCampaign({ ...currentCampaign, description: e.target.value })}
+                                    onInput={(e: CallbackEvent<"s-text-field">) => setCurrentCampaign({ ...currentCampaign, description: e.currentTarget.value })}
                                     placeholder="Describe the purpose of this campaign"
                                     label=""
                                     disabled={SYSTEM_CAMPAIGNS.includes(currentCampaign.name || "")}
@@ -220,7 +194,7 @@ export default function ProductRecommendations() {
                                 <s-switch
                                     label="Active"
                                     checked={currentCampaign.isActive}
-                                    onChange={(e: any) => setCurrentCampaign({ ...currentCampaign, isActive: e.target.checked })}
+                                    onInput={(e: CallbackEvent<"s-switch">) => setCurrentCampaign({ ...currentCampaign, isActive: e.currentTarget.checked })}
                                 />
                             )}
                             {!SYSTEM_CAMPAIGNS.includes(currentCampaign.name || "") && currentCampaign.id && (
@@ -242,12 +216,14 @@ export default function ProductRecommendations() {
                                     </s-stack>
                                     {SYSTEM_CAMPAIGNS.includes(currentCampaign.name || "") ? (
                                         <s-stack gap="base">
-                                            <s-text>These built-in triggers are automatically managed.</s-text>
-                                            <s-stack direction="inline" gap="base">
-                                                {(SYSTEM_TRIGGERS[currentCampaign.name!] || currentCampaign.triggerKeywords)?.map((kw, i) => (
-                                                    <s-badge key={i}>{kw}</s-badge>
-                                                ))}
-                                            </s-stack>
+                                            <s-box padding="small" border="base base dashed" borderRadius="base" background="subdued">
+                                                {/* @ts-ignore */}
+                                                <s-stack direction="inline" gap="small" wrap="wrap">
+                                                    {(SYSTEM_TRIGGERS[currentCampaign.name!] || currentCampaign.triggerKeywords)?.map((kw, i) => (
+                                                        <s-badge key={i}>{kw}</s-badge>
+                                                    ))}
+                                                </s-stack>
+                                            </s-box>
                                         </s-stack>
                                     ) : (
                                         <>
@@ -256,9 +232,9 @@ export default function ProductRecommendations() {
                                                 details="When a customer message contains these words, this recommendation will be triggered. Separate by comma."
                                                 placeholder="e.g., 'new arrivals', 'best sellers', 'sale items'"
                                                 value={currentCampaign.triggerKeywords?.join(", ")}
-                                                onInput={(e: any) => setCurrentCampaign({
+                                                onInput={(e: CallbackEvent<"s-text-field">) => setCurrentCampaign({
                                                     ...currentCampaign,
-                                                    triggerKeywords: e.target.value.split(",").map((s: string) => s.trim())
+                                                    triggerKeywords: e.currentTarget.value.split(",").map((s: string) => s.trim())
                                                 })}
                                             />
 
@@ -280,73 +256,58 @@ export default function ProductRecommendations() {
                             </div>
                             <s-stack padding="base" gap="base">
                                 {currentCampaign._products?.map(product => (
-                                    <s-stack key={product.prodId} overflow="hidden" border="base" borderRadius="base">
-                                        <div style={{ background: "white", width: "100%" }}>
-                                            <s-grid gridTemplateColumns="auto 1fr auto" gap="base" padding="base">
-                                                {product.image && <s-thumbnail src={product.image} />}
-                                                <s-stack>
-                                                    <s-heading>{product.title}</s-heading>
-                                                    <s-text>ID: {product.prodId.split("/").pop()}</s-text>
-                                                </s-stack>
-                                                <s-button tone="critical" variant="primary" icon="delete" onClick={() => handleRemoveProduct(product.prodId)} />
-                                            </s-grid>
-                                        </div>
+                                    <s-stack key={product.prodId} overflow="hidden" border="base" borderRadius="base" direction="inline" padding="small-200" justifyContent="space-between" alignItems="center">
+                                        <s-stack direction="inline" gap="small" alignItems="center">
+                                            {product.image && <s-thumbnail size="small-100" src={product.image} alt={product.title} />}
+                                            <strong>{product.title}</strong>
+                                        </s-stack>
+                                        <s-button icon="x" onClick={() => handleRemoveProduct(product.prodId)} />
                                     </s-stack>
                                 ))}
-                                {(currentCampaign._products?.length || 0) === 0 && (
-                                    <s-stack alignItems="center" padding="base">
-                                        <s-text>No products selected</s-text>
-                                    </s-stack>
-                                )}
                             </s-stack>
                         </s-stack>
                     </s-grid>
                 </s-stack>
 
-                {/* Product Selection Modal */}
-                <s-modal id="product-select-modal" open={isProductModalOpen} onClose={() => setIsProductModalOpen(false)}>
+
+                <s-modal
+                    {...{ open: isProductModalOpen } as any}
+                    onClose={() => setIsProductModalOpen(false)}
+                    heading="Select Products"
+                >
                     <s-stack gap="base" padding="base">
-                        <s-heading>Select Products</s-heading>
                         <s-search-field
                             placeholder="Search products..."
                             value={productSearchQuery}
-                            onInput={(e: any) => setProductSearchQuery(e.target.value)}
-                            onClear={() => setProductSearchQuery("")}
+                            onInput={(e: CallbackEvent<"s-search-field">) => setProductSearchQuery(e.currentTarget.value)}
                         />
                         <div style={{ maxHeight: "300px", overflowY: "auto" }}>
-                            <s-stack gap="small">
+                            <s-grid gridTemplateColumns="1fr" gap="small">
                                 {filteredProductsForModal.map(p => (
-                                    <s-stack
-                                        key={p.prodId}
-                                        direction="inline"
-                                        alignItems="center"
-                                        gap="base"
-                                        padding="small"
-                                        border="base"
-                                        borderRadius="base"
-                                        onClick={() => {
-                                            const next = new Set(selectedProductIds);
-                                            if (next.has(p.prodId)) next.delete(p.prodId);
-                                            else next.add(p.prodId);
-                                            setSelectedProductIds(next);
-                                        }}
-                                        style={{ cursor: "pointer", background: selectedProductIds.has(p.prodId) ? "#f1f8f5" : "transparent" }}
-                                    >
-                                        <input
-                                            type="checkbox"
+                                    <s-stack key={p.prodId} direction="inline" gap="base" alignItems="center" padding="small" border="base" borderRadius="base">
+                                        <s-checkbox
                                             checked={selectedProductIds.has(p.prodId)}
-                                            readOnly
-                                            style={{ pointerEvents: "none" }}
+                                            onChange={() => {
+                                                const newSet = new Set(selectedProductIds);
+                                                if (newSet.has(p.prodId)) {
+                                                    newSet.delete(p.prodId);
+                                                } else {
+                                                    newSet.add(p.prodId);
+                                                }
+                                                setSelectedProductIds(newSet);
+                                            }}
                                         />
-                                        {p.image && <s-thumbnail src={p.image} size="small" />}
-                                        <s-text fontWeight={selectedProductIds.has(p.prodId) ? "bold" : "regular"}>{p.title}</s-text>
+                                        {p.image && <s-thumbnail src={p.image} alt={p.title} size="small" />}
+                                        <s-text>{p.title}</s-text>
                                     </s-stack>
                                 ))}
-                            </s-stack>
+                            </s-grid>
                         </div>
+                        <s-stack direction="inline" justifyContent="end" gap="base">
+                            <s-button onClick={() => setIsProductModalOpen(false)}>Cancel</s-button>
+                            <s-button variant="primary" onClick={confirmAddProducts}>Done</s-button>
+                        </s-stack>
                     </s-stack>
-                    <s-button slot="primary-action" onClick={confirmAddProducts}>Done</s-button>
-                    <s-button slot="secondary-actions" onClick={() => setIsProductModalOpen(false)}>Cancel</s-button>
                 </s-modal>
             </>
         );
@@ -354,125 +315,89 @@ export default function ProductRecommendations() {
 
     return (
         <s-stack gap="base">
-            {/* Title(header) */}
-            <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base">
-                <s-stack>
-                    <s-heading><span style={{ fontSize: "1.5em", fontWeight: "bold" }}>Product Recommendations</span></s-heading>
-                    <s-paragraph>Train the AI to suggest the right products for every customer intent.</s-paragraph>
-                </s-stack>
-                <s-button icon="chat">Test AI</s-button>
-            </s-stack>
+            <s-grid gridTemplateColumns="1fr 1fr" gap="base">
+                {SYSTEM_CAMPAIGNS.map(name => {
+                    const campaign = campaigns.find(c => c.name === name);
+                    const isActive = campaign?.isActive ?? true;
+                    const count = campaign?._products?.length || 0;
 
-            <s-stack gap="base">
+                    return (
+                        <s-stack key={name} padding="base" border="base" borderRadius="base" gap="base">
+                            <div style={{ background: "white" }}>
+                                <s-stack direction="inline" justifyContent="space-between" alignItems="center">
+                                    <s-stack direction="inline" gap="base" alignItems="center">
+                                        <div style={{ padding: "8px", background: "#f1f2f3", borderRadius: "8px" }}>
+                                            {name === "Best Sellers" ? <Crown size={20} /> : <Sparkles size={20} />}
+                                        </div>
+                                        <s-stack gap="none">
+                                            <strong>{name}</strong>
+                                            <s-text color="subdued">System Managed</s-text>
+                                        </s-stack>
+                                    </s-stack>
+                                    <s-badge tone={isActive ? "success" : "info"}>{isActive ? "Active" : "Inactive"}</s-badge>
+                                </s-stack>
+                            </div>
+
+                            <s-stack direction="inline" justifyContent="end" alignItems="center">
+                                <s-text>{count} products selected</s-text>
+                                <s-button onClick={() => handleConfigureSystemCampaign(name)}>Configure</s-button>
+                            </s-stack>
+                        </s-stack>
+                    );
+                })}
+            </s-grid>
+            <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small">
                 <s-stack direction="inline" alignItems="center" gap="small-200">
                     <Sparkles size={16} />
-                    <s-text><span style={{ fontWeight: "bold" }}>Core Capabilities</span></s-text>
+                    <s-text><span style={{ fontWeight: "bold" }}>Custom Campaigns</span></s-text>
                 </s-stack>
-                <s-grid gridTemplateColumns="1fr 1fr" gap="base">
-                    {/* Preserved Best Sellers Card */}
-                    <s-stack border="base" borderRadius="base" overflow="hidden">
-                        <div style={{ background: "white", width: "100%", height: "100%" }}>
-                            <s-stack padding="base" direction="inline" justifyContent="space-between" gap="base">
-                                <s-stack direction="inline" alignItems="center" gap="small">
-                                    <div style={{ width: "50px", height: "50px", backgroundColor: "#FFE52A22", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "12px", boxShadow: "rgb(255, 255, 255, 0.25) 1px 1px 3px 0px inset, rgba(255, 255, 255, 0.2) -1px -1px 3px 1px inset" }}>
-                                        <Crown color="#eed309ff" />
-                                    </div>
-                                    <s-stack gap="small-200">
-                                        <s-heading>Best Sellers</s-heading>
-                                        <s-text>Automatically suggests top-selling products.</s-text>
-                                        <s-stack direction="inline" gap="small">
-                                            <s-badge>24 Products</s-badge>
-                                            <s-badge tone="success">Active</s-badge>
-                                        </s-stack>
-                                    </s-stack>
-                                </s-stack>
-                                <s-stack>
-                                    <s-button onClick={() => handleConfigureSystemCampaign('Best Sellers')}>Configure</s-button>
-                                </s-stack>
-                            </s-stack>
-                        </div>
-                    </s-stack>
-
-                    {/* Preserved New Arrivals Card */}
-                    <s-stack border="base" borderRadius="base" overflow="hidden">
-                        <div style={{ background: "white", width: "100%", height: "100%" }}>
-                            <s-stack padding="base" direction="inline" justifyContent="space-between" gap="base">
-                                <s-stack direction="inline" alignItems="center" gap="small">
-                                    <div style={{ width: "50px", height: "50px", backgroundColor: "#B500B222", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "12px", boxShadow: "rgb(255, 255, 255, 0.25) 1px 1px 3px 0px inset, rgba(255, 255, 255, 0.2) -1px -1px 3px 1px inset" }}>
-                                        <Sparkles color="#B500B2" />
-                                    </div>
-                                    <s-stack gap="small-200">
-                                        <s-heading>New Arrivals</s-heading>
-                                        <s-text>Highlights items added in the last 30 days.</s-text>
-                                        <s-stack direction="inline" gap="small">
-                                            <s-badge>12 Products</s-badge>
-                                            <s-badge tone="success">Active</s-badge>
-                                        </s-stack>
-                                    </s-stack>
-                                </s-stack>
-                                <s-stack>
-                                    <s-button onClick={() => handleConfigureSystemCampaign('New Arrivals')}>Configure</s-button>
-                                </s-stack>
-                            </s-stack>
-                        </div>
-                    </s-stack>
-                </s-grid>
+                <s-stack>
+                    <s-button icon="plus" onClick={handleCreateNew}>Create Campaign</s-button>
+                </s-stack>
             </s-stack>
 
-            <s-stack gap="base">
-                <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="small">
-                    <s-stack direction="inline" alignItems="center" gap="small-200">
-                        <Sparkles size={16} />
-                        <s-text><span style={{ fontWeight: "bold" }}>Custom Campaigns</span></s-text>
-                    </s-stack>
-                    <s-stack>
-                        <s-button icon="plus" onClick={handleCreateNew}>Create Campaign</s-button>
-                    </s-stack>
-                </s-stack>
+            <s-table>
+                <s-table-header-row>
+                    <s-table-header>Campaign Name</s-table-header>
+                    <s-table-header>Triggers</s-table-header>
+                    <s-table-header>Products</s-table-header>
+                    <s-table-header>Status</s-table-header>
+                    <s-table-header></s-table-header>
+                </s-table-header-row>
 
-                <s-table>
-                    <s-table-header-row>
-                        <s-table-header>Campaign Name</s-table-header>
-                        <s-table-header>Triggers</s-table-header>
-                        <s-table-header>Products</s-table-header>
-                        <s-table-header>Status</s-table-header>
-                        <s-table-header></s-table-header>
-                    </s-table-header-row>
-
-                    <s-table-body>
-                        {campaigns.length === 0 ? (
-                            <s-table-row>
-                                <s-table-cell {...{ colSpan: 5 }}>No campaigns found. Create one to get started.</s-table-cell>
+                <s-table-body>
+                    {campaigns.length === 0 ? (
+                        <s-table-row>
+                            <s-table-cell {...{ colSpan: 5 }}>No campaigns found. Create one to get started.</s-table-cell>
+                        </s-table-row>
+                    ) : (
+                        campaigns.filter(c => !SYSTEM_CAMPAIGNS.includes(c.name)).map(campaign => (
+                            <s-table-row key={campaign.id}>
+                                <s-table-cell>{campaign.name}</s-table-cell>
+                                <s-table-cell>
+                                    <s-stack direction="inline" gap="small">
+                                        {campaign.triggerKeywords.slice(0, 3).map(k => <s-badge key={k}>{k}</s-badge>)}
+                                        {campaign.triggerKeywords.length > 3 && <s-badge>+{campaign.triggerKeywords.length - 3}</s-badge>}
+                                    </s-stack>
+                                </s-table-cell>
+                                <s-table-cell>{campaign._products?.length || 0} items</s-table-cell>
+                                <s-table-cell>
+                                    <s-switch
+                                        checked={campaign.isActive}
+                                        onChange={() => handleStatusToggle(campaign.id, campaign.isActive)}
+                                    />
+                                </s-table-cell>
+                                <s-table-cell>
+                                    <s-stack direction="inline" gap="small">
+                                        <s-button icon="edit" onClick={() => handleEdit(campaign)} />
+                                        <s-button icon="delete" onClick={() => handleDelete(campaign.id)} />
+                                    </s-stack>
+                                </s-table-cell>
                             </s-table-row>
-                        ) : (
-                            campaigns.filter(c => !SYSTEM_CAMPAIGNS.includes(c.name)).map(campaign => (
-                                <s-table-row key={campaign.id}>
-                                    <s-table-cell>{campaign.name}</s-table-cell>
-                                    <s-table-cell>
-                                        <s-stack direction="inline" gap="small">
-                                            {campaign.triggerKeywords.slice(0, 3).map(k => <s-badge key={k}>{k}</s-badge>)}
-                                            {campaign.triggerKeywords.length > 3 && <s-badge>+{campaign.triggerKeywords.length - 3}</s-badge>}
-                                        </s-stack>
-                                    </s-table-cell>
-                                    <s-table-cell>{campaign._products?.length || 0} items</s-table-cell>
-                                    <s-table-cell>
-                                        <s-switch
-                                            checked={campaign.isActive}
-                                            onChange={() => handleStatusToggle(campaign.id, campaign.isActive)}
-                                        />
-                                    </s-table-cell>
-                                    <s-table-cell>
-                                        <s-stack direction="inline" gap="small">
-                                            <s-button icon="edit" onClick={() => handleEdit(campaign)} />
-                                            <s-button icon="delete" onClick={() => handleDelete(campaign.id)} />
-                                        </s-stack>
-                                    </s-table-cell>
-                                </s-table-row>
-                            ))
-                        )}
-                    </s-table-body>
-                </s-table>
-            </s-stack>
+                        ))
+                    )}
+                </s-table-body>
+            </s-table>
         </s-stack>
     );
 }

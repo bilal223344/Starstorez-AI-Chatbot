@@ -14,7 +14,7 @@ interface ResponseToneProps {
 export function ResponseTone({ data, setData }: ResponseToneProps) {
     const [isOpen, setIsOpen] = useState(false);
 
-    const handleToneChange = (event: CallbackEvent<"s-choice-list">) => {
+    const handleToneChange = (event: any) => {
         setData(prev => ({ ...prev, selectedTone: event.currentTarget.values }));
     };
 
@@ -32,7 +32,7 @@ export function ResponseTone({ data, setData }: ResponseToneProps) {
                             Select the personality style your AI uses when communicating with customers.
                         </s-tooltip>
                         {/* <div onClick={(e) => e.stopPropagation()}> */}
-                            <s-icon interestFor="tone-tooltip" type="info"></s-icon>
+                        <s-icon interestFor="tone-tooltip" type="info"></s-icon>
                         {/* </div> */}
                     </div>
                     <s-icon type={isOpen ? "chevron-up" : "chevron-down"} />
@@ -47,7 +47,7 @@ export function ResponseTone({ data, setData }: ResponseToneProps) {
                             <s-choice-list
                                 label="Tone Selection"
                                 name="tone-selection"
-                                value={data.selectedTone}
+                                {...{ selected: data.selectedTone } as any}
                                 onChange={handleToneChange}
                             >
                                 <s-choice value="professional">Professional</s-choice>

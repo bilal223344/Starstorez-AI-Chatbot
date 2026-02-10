@@ -1,4 +1,5 @@
 import { useFetcher } from "react-router";
+import { CallbackEvent } from "@shopify/polaris-types";
 import { useState, useEffect, useMemo } from "react";
 
 // --- Types ---
@@ -19,40 +20,31 @@ interface FAQFormData {
 
 const CATEGORIES = ["General", "Shipping", "Returns", "Product", "Payment", "Account"];
 
-export default function FAQs() {
-    const loader = useFetcher<{ tab: string; faqs: FAQ[] }>();
+export default function FAQs({ faqs: initialFaqs }: { faqs: FAQ[] }) {
+    // const loader = useFetcher<{ tab: string; faqs: FAQ[] }>(); // Removed
     const fetcher = useFetcher<{ success: boolean; faq?: FAQ; message?: string }>();
 
-    const [faqs, setFaqs] = useState<FAQ[]>([]);
+    const [faqs, setFaqs] = useState<FAQ[]>(initialFaqs);
     const [editingFaq, setEditingFaq] = useState<FAQ | null>(null);
     const [formData, setFormData] = useState<FAQFormData>({ question: "", answer: "", category: "General" });
     const [searchQuery, setSearchQuery] = useState("");
     const [deleteTarget, setDeleteTarget] = useState<FAQ | null>(null);
-    const [notification, setNotification] = useState<{ tone: string; message: string } | null>(null);
+    const [notification, setNotification] = useState<{ tone: "success" | "info" | "warning" | "critical"; message: string } | null>(null);
 
-    // Self-load on mount
+    // Sync props to state
     useEffect(() => {
-        if (loader.state === "idle" && !loader.data) {
-            loader.load("/app/trainingdata?tab=faqs");
-        }
-    }, []);
-
-    // Sync fetched data
-    useEffect(() => {
-        if (loader.data?.faqs) {
-            setFaqs(loader.data.faqs);
-        }
-    }, [loader.data]);
+        setFaqs(initialFaqs);
+    }, [initialFaqs]);
 
     // Handle CRUD action responses
     useEffect(() => {
         if (fetcher.state === "idle" && fetcher.data?.success) {
-            loader.load("/app/trainingdata?tab=faqs");
+            // loader.load("/app/trainingdata?tab=faqs"); // Handled by parent revalidation
             setNotification({ tone: "success", message: editingFaq ? "FAQ updated!" : "FAQ saved!" });
             resetForm();
             setTimeout(() => setNotification(null), 3000);
         }
-    }, [fetcher.state, fetcher.data]);
+    }, [fetcher.state, fetcher.data, editingFaq]);
 
     const isBusy = fetcher.state !== "idle";
 
@@ -70,14 +62,8 @@ export default function FAQs() {
         });
     }, [faqs, searchQuery]);
 
-    // Loading state
-    if (loader.state === "loading" || !loader.data) {
-        return (
-            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", padding: "60px 0" }}>
-                <s-spinner size="large"></s-spinner>
-            </div>
-        );
-    }
+    // Loading state removed - handled by Suspense in parent
+
 
     const openCreate = () => {
         resetForm();
@@ -125,8 +111,7 @@ export default function FAQs() {
                     <s-search-field
                         placeholder="Search FAQs..."
                         value={searchQuery}
-                        onInput={(e: any) => setSearchQuery(e.target.value)}
-                        onClear={() => setSearchQuery("")}
+                        onInput={(e: CallbackEvent<"s-search-field">) => setSearchQuery(e.currentTarget.value)}
                     />
                     <s-button
                         variant="primary"
@@ -213,8 +198,8 @@ export default function FAQs() {
                     <s-select
                         label="Category"
                         value={formData.category}
-                        onChange={(e: any) =>
-                            setFormData({ ...formData, category: e.target.value })
+                        onInput={(e: CallbackEvent<"s-select">) =>
+                            setFormData({ ...formData, category: e.currentTarget.value })
                         }
                     >
                         {CATEGORIES.map((cat) => (
@@ -228,8 +213,9 @@ export default function FAQs() {
                         label="Question"
                         placeholder="e.g. How long does shipping take?"
                         value={formData.question}
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         onInput={(e: any) =>
-                            setFormData({ ...formData, question: e.target.value })
+                            setFormData({ ...formData, question: e.currentTarget.value })
                         }
                     />
 
@@ -238,8 +224,9 @@ export default function FAQs() {
                         placeholder="e.g. Standard shipping takes 3-5 business days."
                         rows={4}
                         value={formData.answer}
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         onInput={(e: any) =>
-                            setFormData({ ...formData, answer: e.target.value })
+                            setFormData({ ...formData, answer: e.currentTarget.value })
                         }
                     />
                 </s-stack>
