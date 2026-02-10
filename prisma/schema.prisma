@@ -346,3 +346,20 @@ model Discount {
 
   @@index([shop])
 }
+
+// Store-level FAQs (general knowledge for the AI chatbot)
+// Separate from ProductFAQ which is product-specific
+model FAQ {
+  id        String   @id @default(uuid())
+  shop      String
+  question  String
+  answer    String   @db.Text
+  category  String   @default("General")
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([shop])
+  @@index([shop, category])
+}

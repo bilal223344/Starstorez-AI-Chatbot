@@ -8,6 +8,7 @@ import Products from "app/components/TrainingData/Products";
 import ProductRecommendations from "app/components/TrainingData/ProductRecommendations";
 import Profile from "app/components/TrainingData/Profile";
 import { Database } from "lucide-react";
+import FAQs from "app/components/TrainingData/FAQs";
 
 // --- LOADER ---
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -130,6 +131,49 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 
 
+    // 6. Fetch Store-level FAQs (auto-seed defaults on first visit)
+    const faqCount = await prisma.fAQ.count({ where: { shop } });
+
+    if (faqCount === 0) {
+        await prisma.fAQ.createMany({
+            data: [
+                {
+                    shop,
+                    question: "How do I track my order?",
+                    answer: "You can track your order by clicking the link in your confirmation email or logging into your account.",
+                    category: "Shipping",
+                    sortOrder: 0,
+                },
+                {
+                    shop,
+                    question: "What is your return policy?",
+                    answer: "We accept returns within 30 days of purchase. Items must be unused and in original packaging.",
+                    category: "Returns",
+                    sortOrder: 1,
+                },
+                {
+                    shop,
+                    question: "Do you ship internationally?",
+                    answer: "Yes, we ship to over 50 countries worldwide. Shipping rates calculate at checkout.",
+                    category: "Shipping",
+                    sortOrder: 2,
+                },
+                {
+                    shop,
+                    question: "Are your products sustainable?",
+                    answer: "Yes, we source 100% recycled materials for our packaging and prioritize eco-friendly manufacturing.",
+                    category: "Product",
+                    sortOrder: 3,
+                },
+            ],
+        });
+    }
+
+    const faqs = await prisma.fAQ.findMany({
+        where: { shop },
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }]
+    });
+
     return Response.json({
         products,
         campaigns,
@@ -137,6 +181,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         policies,
         discounts,
         brandProfile,
+        faqs,
         shop
     });
 };
@@ -470,6 +515,37 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             return Response.json({ success: true, message: `Policies synced: ${results.join(", ")}` });
         }
 
+        // --- STORE FAQ ACTIONS ---
+        if (actionType === "create_store_faq") {
+            const question = formData.get("question") as string;
+            const answer = formData.get("answer") as string;
+            const category = formData.get("category") as string || "General";
+
+            await prisma.fAQ.create({
+                data: { shop, question, answer, category }
+            });
+            return Response.json({ success: true, message: "FAQ created" });
+        }
+
+        if (actionType === "update_store_faq") {
+            const faqId = formData.get("faqId") as string;
+            const question = formData.get("question") as string;
+            const answer = formData.get("answer") as string;
+            const category = formData.get("category") as string || "General";
+
+            await prisma.fAQ.update({
+                where: { id: faqId },
+                data: { question, answer, category }
+            });
+            return Response.json({ success: true, message: "FAQ updated" });
+        }
+
+        if (actionType === "delete_store_faq") {
+            const faqId = formData.get("faqId") as string;
+            await prisma.fAQ.delete({ where: { id: faqId } });
+            return Response.json({ success: true, message: "FAQ deleted" });
+        }
+
         // --- BRAND PROFILE ACTIONS ---
         if (actionType === "update_brand") {
             const story = formData.get("story") as string;
@@ -567,7 +643,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 
 export default function TrainingData() {
-    const { products, campaigns, currentScopes, policies, discounts, brandProfile } = useLoaderData<typeof loader>();
+    const { products, campaigns, currentScopes, policies, discounts, brandProfile, faqs } = useLoaderData<typeof loader>();
     const [activeTab, setActiveTab] = useState("products");
     console.log("[CURRENT SCOPE]", currentScopes)
     // Simple tab implementation without external library to match existing styles
@@ -587,6 +663,8 @@ export default function TrainingData() {
                 return <ProductRecommendations campaigns={campaigns} allProducts={products} />;
             case "profile":
                 return <Profile brandProfile={brandProfile} />;
+            case "faqs":
+                return <FAQs faqs={faqs} />;
             default:
                 return <Products products={products} />;
         }
@@ -622,7 +700,7 @@ export default function TrainingData() {
                             <s-button icon="globe-lines" onClick={() => setActiveTab("market")} disabled>Market</s-button>
                         </s-stack>
                         <s-stack border="base" borderWidth="none base none base" borderColor="strong" direction="inline" justifyContent="center" gap="large">
-                            <s-button icon="info" onClick={() => setActiveTab("faqs")} disabled>FAQs</s-button>
+                            <s-button icon="info" onClick={() => setActiveTab("faqs")}>FAQs</s-button>
                             <s-button icon="shield-check-mark" onClick={() => setActiveTab("policies")} active={activeTab === "policies"}>Policies</s-button>
                             <s-button icon="receipt" onClick={() => setActiveTab("documents")} disabled>Documents</s-button>
                         </s-stack>
