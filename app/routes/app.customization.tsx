@@ -19,7 +19,13 @@ import prisma from "app/db.server";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { Prisma } from "@prisma/client";
 import { DEFAULT_CHATBOT_SETTINGS } from "app/utils/defaultCustomizer";
-
+// import { AppWindow, BookText, Eye, Layers, Palette, Rocket } from 'lucide-react';
+// import Branding from "app/components/CustomizationAndAppearance/Branding";
+// import Window from "app/components/CustomizationAndAppearance/Window";
+// import Launcher from "app/components/CustomizationAndAppearance/Launcher";
+// import Visibility from "app/components/CustomizationAndAppearance/Visibility";
+// import Content from "app/components/CustomizationAndAppearance/Content";
+// import AddOns from "app/components/CustomizationAndAppearance/AddOns";
 
 export interface MasterState {
     chatWindow: {
@@ -146,7 +152,7 @@ export interface MasterState {
 // ============================================================================
 export const loader = async ({ request }: LoaderFunctionArgs) => {
     const { session } = await authenticate.admin(request);
-    
+
     if (!session?.shop) {
         return { customization: null };
     }
@@ -175,7 +181,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 // ============================================================================
 export const action = async ({ request }: ActionFunctionArgs) => {
     const { session } = await authenticate.admin(request);
-    
+
     if (!session?.shop) {
         return { error: "Unauthorized" };
     }
@@ -183,8 +189,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     try {
         const body = await request.json();
         // Handle both stringified JSON and direct object
-        const settings: MasterState = typeof body.settings === 'string' 
-            ? JSON.parse(body.settings) 
+        const settings: MasterState = typeof body.settings === 'string'
+            ? JSON.parse(body.settings)
             : body.settings;
 
         if (!settings) {
@@ -198,7 +204,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
         // Convert MasterState to Prisma JSON format
         const settingsJson = JSON.parse(JSON.stringify(settings)) as unknown as Prisma.InputJsonValue;
-        
+
         await prisma.chatbotCustomization.upsert({
             where: { shop: session.shop },
             create: {
@@ -242,10 +248,10 @@ export default function Customization() {
                     [key]: value,
                 },
             };
-            
+
             // Auto-save to database (debounced)
             debouncedSave(updated);
-            
+
             return updated;
         });
 
@@ -277,7 +283,7 @@ export default function Customization() {
         if (saveTimeoutRef.current) {
             clearTimeout(saveTimeoutRef.current);
         }
-        
+
         saveTimeoutRef.current = setTimeout(() => {
             saveCustomization(data);
         }, 1000); // Save 1 second after last change
@@ -309,8 +315,103 @@ export default function Customization() {
                     Saving customization...
                 </s-banner>
             )}
-            <s-grid gridTemplateColumns="8fr 5fr" gap="large">
+
+            <s-grid gridTemplateColumns="7fr 5fr" gap="large">
+                {/* --- Left Sidebar with Customization Options 
+                    <div style={{ height: "fit-content", position: "sticky", top: 0, width: "70px", flex: "1", }}>
+                    <div style={{ position: "fixed",  top: '1px', zIndex: 1000 }}>
+                        <s-stack gap="base" background="base" paddingBlock="small-100">
+                            <div style={{ width: "fit-content", height: "fit-content", display: "flex", alignItems: "center", gap: "10px" }}>
+                                <div />
+                                <div>
+                                    <s-clickable blockSize="50px" inlineSize="50px" background="strong" borderRadius="base" border="base" overflow="hidden">
+                                        <div style={{ width: "100%", height: "100%", display: "flex", justifyContent: "center", alignItems: "center" }}>
+                                            <Palette />
+                                        </div>
+                                    </s-clickable>
+                                    <s-text><span style={{ fontSize: "10px" }}>Branding</span></s-text>
+                                </div>
+                                <div style={{ height: "40px", width: "2px", borderRadius: "999px", background: "black" }} />
+                            </div>
+
+                            <div style={{ width: "fit-content", height: "fit-content", display: "flex", alignItems: "center", gap: "10px" }}>
+                                <div />
+                                <div>
+                                    <s-clickable blockSize="50px" inlineSize="50px" background="strong" borderRadius="base" border="base" overflow="hidden">
+                                        <div style={{ width: "100%", height: "100%", display: "flex", justifyContent: "center", alignItems: "center" }}>
+                                            <AppWindow />
+                                        </div>
+                                    </s-clickable>
+                                    <s-text><span style={{ fontSize: "10px" }}>Window</span></s-text>
+                                </div>
+                                <div style={{ height: "40px", width: "2px", borderRadius: "999px", background: "black" }} />
+                            </div>
+
+                            <div style={{ width: "fit-content", height: "fit-content", display: "flex", alignItems: "center", gap: "10px" }}>
+                                <div />
+                                <div>
+                                    <s-clickable blockSize="50px" inlineSize="50px" background="strong" borderRadius="base" border="base" overflow="hidden">
+                                        <div style={{ width: "100%", height: "100%", display: "flex", justifyContent: "center", alignItems: "center" }}>
+                                            <Rocket />
+                                        </div>
+                                    </s-clickable>
+                                    <s-text><span style={{ fontSize: "10px" }}>Launcher</span></s-text>
+                                </div>
+                                <div style={{ height: "40px", width: "2px", borderRadius: "999px", background: "black" }} />
+                            </div>
+
+                            <div style={{ width: "fit-content", height: "fit-content", display: "flex", alignItems: "center", gap: "10px" }}>
+                                <div />
+                                <div>
+                                    <s-clickable blockSize="50px" inlineSize="50px" background="strong" borderRadius="base" border="base" overflow="hidden">
+                                        <div style={{ width: "100%", height: "100%", display: "flex", justifyContent: "center", alignItems: "center" }}>
+                                            <Eye />
+                                        </div>
+                                    </s-clickable>
+                                    <s-text><span style={{ fontSize: "10px" }}>Visibility</span></s-text>
+                                </div>
+                                <div style={{ height: "40px", width: "2px", borderRadius: "999px", background: "black" }} />
+                            </div>
+
+                            <div style={{ width: "fit-content", height: "fit-content", display: "flex", alignItems: "center", gap: "10px" }}>
+                                <div />
+                                <div>
+                                    <s-clickable blockSize="50px" inlineSize="50px" background="strong" borderRadius="base" border="base" overflow="hidden">
+                                        <div style={{ width: "100%", height: "100%", display: "flex", justifyContent: "center", alignItems: "center" }}>
+                                            <BookText />
+                                        </div>
+                                    </s-clickable>
+                                    <s-text><span style={{ fontSize: "10px" }}>Content</span></s-text>
+                                </div>
+                                <div style={{ height: "40px", width: "2px", borderRadius: "999px", background: "black" }} />
+                            </div>
+
+                            <div style={{ width: "fit-content", height: "fit-content", display: "flex", alignItems: "center", gap: "10px" }}>
+                                <div />
+                                <div>
+                                    <s-clickable blockSize="50px" inlineSize="50px" background="strong" borderRadius="base" border="base" overflow="hidden">
+                                        <div style={{ width: "100%", height: "100%", display: "flex", justifyContent: "center", alignItems: "center" }}>
+                                            <Layers />
+                                        </div>
+                                    </s-clickable>
+                                    <s-text><span style={{ fontSize: "10px" }}>Add-ons</span></s-text>
+                                </div>
+                                <div style={{ height: "40px", width: "2px", borderRadius: "999px", background: "black" }} />
+                            </div>
+
+                        </s-stack>
+                    </div>
+                </div>
+                --- */}
+
                 <s-stack gap="base">
+
+                    {/* <Branding /> */}
+                    {/* <Window /> */}
+                    {/* <Launcher /> */}
+                    {/* <Visibility /> */}
+                    {/* <Content /> */}
+                    {/* <AddOns /> */}
 
                     {/* Design Presets - Top of page */}
                     <PresetTemplates onApplyPreset={handleApplyPreset} />
@@ -388,7 +489,7 @@ export default function Customization() {
                 {/* Widget Customize Preview */}
                 <div style={{ height: "fit-content", width: "100%", flex: "1", }}>
                     <s-stack>
-                        <div style={{ position: 'fixed', width: "35%", top: '1px', zIndex: 10 }}>
+                        <div style={{ position: 'fixed', width: "40%", top: '1px', zIndex: 10 }}>
                             <s-stack padding="small-200">
                                 <s-heading>Live Preview</s-heading>
                             </s-stack>

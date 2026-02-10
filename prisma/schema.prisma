@@ -54,6 +54,9 @@ model Product {
   // Messages where this product was recommended by the AI
   recommendedInMessages MessageProduct[]
 
+  // FAQs
+  faqs ProductFAQ[]
+
   @@index([shop])
 }
 
@@ -277,6 +280,69 @@ model ChatConfiguration {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([shop])
+}
+
+model ProductFAQ {
+  id       String @id @default(uuid())
+  question String
+  answer   String
+
+  // Link to Product
+  productId Int
+  product   Product @relation(fields: [productId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([productId])
+}
+
+model Campaign {
+  id          String  @id @default(uuid())
+  shop        String // Links to the specific store
+  name        String // e.g., "Winter Collection", "Gift Guide"
+  description String? // Purpose: "For customers looking for holiday gifts"
+  isActive    Boolean @default(true)
+
+  // Triggers: specific words like "gift", "present", "dad", "winter"
+  triggerKeywords String[]
+
+  // Relation: The products inside this campaign
+  products CampaignProduct[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([shop])
+}
+
+// Bridge Table: Links Campaigns to Products
+model CampaignProduct {
+  id         String   @id @default(uuid())
+  campaignId String
+  productId  String // The Shopify Product ID (e.g., "gid://shopify/Product/123")
+  // Optional: Override title/price for this specific campaign if needed
+  // specificNote String? 
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, productId]) // Prevent adding the same product twice in one campaign
+  @@index([campaignId])
+}
+
+model Discount {
+  id          String    @id @default(uuid())
+  shop        String
+  shopifyId   String    @unique
+  title       String
+  code        String
+  startsAt    DateTime
+  endsAt      DateTime?
+  status      String
+  isSuggested Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([shop])
 }

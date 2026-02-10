@@ -46,6 +46,7 @@ app.use(express.static("build/client", { maxAge: "1h" }));
 // 4. REACT ROUTER HANDLER
 // ============================================================================
 // Dynamically import the server build to avoid issues during development
+// @ts-ignore
 const build = await import("./build/server/index.js");
 
 app.all(

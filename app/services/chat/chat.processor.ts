@@ -34,7 +34,7 @@ export async function processChat(
         if (aiResponse.tool_calls) {
             // We only handle one tool type for now
             const toolCall = aiResponse.tool_calls[0] as ChatCompletionMessageToolCall;
-            const args = JSON.parse(toolCall.function.arguments);
+            const args = JSON.parse((toolCall as any).function.arguments);
             console.log(`[Chat-Proc] Tool Call: ${JSON.stringify(args)}`);
 
             console.log(`[Chat-Proc] Executing Search: ${args.search_query}`);
