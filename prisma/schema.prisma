@@ -1,13 +1,7 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
 
-// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
-// enough when changing adapters.
-// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
@@ -34,97 +28,61 @@ model Session {
 }
 
 model Product {
-  id          Int      @id @default(autoincrement())
-  shop        String
-  prodId      String   @unique // gid://shopify/Product/123456
-  title       String
-  description String?  @db.Text
-  tags        String[]
-  collection  String[]
-  options     Json
-  price       Float
-  stock       Int
-  handle      String? // For creating links
-  image       String?
-  isSynced    Boolean  @default(false) // If false, needs re-sync with Pinecone
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  variants              ProductVariant[]
-  // Messages where this product was recommended by the AI
-  recommendedInMessages MessageProduct[]
-
-  // FAQs
-  faqs ProductFAQ[]
+  id             Int              @id @default(autoincrement())
+  shop           String
+  prodId         String           @unique
+  title          String
+  description    String?
+  tags           String[]
+  collection     String[]
+  options        Json
+  price          Float
+  stock          Int
+  handle         String?
+  image          String?
+  isSynced       Boolean          @default(false)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  MessageProduct MessageProduct[]
+  faqs           ProductFAQ[]
+  variants       ProductVariant[]
 
   @@index([shop])
 }
 
 model ProductVariant {
-  id     Int     @id @default(autoincrement())
-  title  String
-  sku    String
-  image  String?
-  option String
-  stock  Int
-
-  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  id        Int     @id @default(autoincrement())
+  title     String
+  sku       String
+  image     String?
+  option    String
+  stock     Int
   productId Int
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([productId])
 }
 
-model Customer {
+model ProductFAQ {
   id        String   @id @default(uuid())
-  shopifyId String?  @unique
-  shop      String
-  email     String
-  firstName String?
-  lastName  String?
-  phone     String?
-  source    String   @default("SHOPIFY") // e.g. "SHOPIFY", "MANUAL", "WEBSITE"
+  question  String
+  answer    String
+  productId Int
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  product   Product  @relation(fields: [productId], references: [id])
 
-  orders Order[]
-  chats  ChatSession[]
-
-  @@unique([shop, email])
-  @@index([shop, email])
+  @@index([productId])
 }
 
-model Order {
-  id          String      @id @default(uuid())
-  shopifyId   String      @unique // gid://shopify/Order/123
-  orderNumber String
-  status      String // e.g., "FULFILLED", "OPEN"
-  totalPrice  Float
-  createdAt   DateTime
-  customerId  String
-  customer    Customer    @relation(fields: [customerId], references: [id])
-  items       OrderItem[]
-}
-
-model OrderItem {
-  id          String  @id @default(uuid())
-  productId   String
-  productName String
-  quantity    Int
-  sku         String?
-  orderId     String
-  order       Order   @relation(fields: [orderId], references: [id])
-}
-
-// For your Chatbot history
 model ChatSession {
   id         String    @id @default(uuid())
-  shop       String // Store identifier
   customerId String?
-  customer   Customer? @relation(fields: [customerId], references: [id])
   isGuest    Boolean   @default(true)
   createdAt  DateTime  @default(now())
-
-  messages Message[]
+  shop       String
+  Customer   Customer? @relation(fields: [customerId], references: [id])
+  Message    Message[]
 
   @@index([shop])
   @@index([customerId])
@@ -133,201 +91,72 @@ model ChatSession {
 model Message {
   id                  String           @id @default(uuid())
   content             String
-  role                String // "user", "assistant", or "system"
+  role                String
   createdAt           DateTime         @default(now())
   sessionId           String
-  session             ChatSession      @relation(fields: [sessionId], references: [id])
+  ChatSession         ChatSession      @relation(fields: [sessionId], references: [id])
   recommendedProducts MessageProduct[]
 }
 
-// Link table for products recommended by AI per message
 model MessageProduct {
-  id            String   @id @default(uuid())
+  id            String   @id
   messageId     String
-  message       Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
   productProdId String?
-  product       Product? @relation(fields: [productProdId], references: [prodId], onDelete: SetNull)
   title         String
   price         Float
   handle        String?
   image         String?
   score         Float?
+  message       Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  Product       Product? @relation(fields: [productProdId], references: [prodId])
 
   @@index([messageId])
   @@index([productProdId])
 }
 
-// Chatbot Customization/Appearance Settings
-model ChatbotCustomization {
-  id        String   @id @default(uuid())
-  shop      String   @unique // One customization per shop
-  settings  Json // Stores the complete MasterState as JSON
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([shop])
-}
-
-// AI Personality & Behavior Settings (Prompts for OpenAI)
-model AISettings {
-  id        String   @id @default(uuid())
-  shop      String   @unique // One AI settings per shop
-  settings  Json // Stores the complete AISettingsState as JSON
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([shop])
-}
-
-// Subscription Plans/Tiers
-model MerchantPlan {
-  id                 String   @id @default(uuid())
-  name               String   @unique // "Free", "Basic", "Pro", "Enterprise"
-  monthlyCredits     Int // Credits per month
-  maxConcurrentChats Int // Max simultaneous chats
-  price              Float // Monthly price in USD
-  features           Json // Additional features as JSON
-  isActive           Boolean  @default(true)
-  createdAt          DateTime @default(now())
-
-  merchants MerchantCredits[]
-}
-
-// Credit Management per Merchant
 model MerchantCredits {
-  id     String       @id @default(uuid())
-  shop   String       @unique // One record per shop
-  planId String
-  plan   MerchantPlan @relation(fields: [planId], references: [id])
+  id               String       @id
+  shop             String       @unique
+  planId           String
+  totalCredits     Int          @default(0)
+  usedCredits      Int          @default(0)
+  remainingCredits Int          @default(0)
+  totalRequests    Int          @default(0)
+  totalUsers       Int          @default(0)
+  periodStart      DateTime     @default(now())
+  periodEnd        DateTime
+  aiEnabled        Boolean      @default(true)
+  autoRecharge     Boolean      @default(true)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  MerchantPlan     MerchantPlan @relation(fields: [planId], references: [id])
+  UsageLog         UsageLog[]
 
-  // Credits
-  totalCredits     Int @default(0) // Total credits for current period
-  usedCredits      Int @default(0) // Credits consumed
-  remainingCredits Int @default(0) // Calculated: totalCredits - usedCredits
-
-  // Usage tracking
-  totalRequests Int @default(0) // Total API requests made
-  totalUsers    Int @default(0) // Total unique users served
-
-  // Billing period
-  periodStart DateTime @default(now())
-  periodEnd   DateTime
-
-  // Control flags
-  aiEnabled    Boolean @default(true) // Manual override for AI responses
-  autoRecharge Boolean @default(true) // Auto-recharge when period resets
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  usageLogs UsageLog[]
-
-  @@index([shop])
   @@index([planId])
-}
-
-// Usage Logging for Analytics & Billing
-model UsageLog {
-  id                String          @id @default(uuid())
-  shop              String
-  merchantCreditsId String
-  merchantCredits   MerchantCredits @relation(fields: [merchantCreditsId], references: [id])
-
-  // Request details
-  requestType String // "AI_CHAT", "KEYWORD_RESPONSE", "MANUAL_HANDOFF"
-  creditsUsed Int    @default(1) // Credits consumed for this request
-
-  // Context
-  sessionId   String? // Chat session ID
-  customerId  String? // Customer who made request
-  userMessage String? // User's message (truncated for privacy)
-
-  // Performance metrics
-  responseTime Int? // Response time in milliseconds
-  tokensUsed   Int? // OpenAI tokens consumed (if applicable)
-
-  // Error tracking
-  wasSuccessful Boolean @default(true)
-  errorMessage  String?
-
-  createdAt DateTime @default(now())
-
-  @@index([shop, createdAt])
-  @@index([merchantCreditsId])
-  @@index([requestType])
-}
-
-// Chat Configuration per Shop
-model ChatConfiguration {
-  id   String @id @default(uuid())
-  shop String @unique
-
-  // AI Control
-  aiEnabled          Boolean @default(true)
-  autoHandoffEnabled Boolean @default(true) // Auto-switch to manual when credits exhausted
-
-  // Response optimization
-  useKeywordResponses  Boolean @default(true) // Use direct responses for common queries
-  maxTokensPerResponse Int     @default(500) // Limit OpenAI token usage
-
-  // Load balancing
-  maxConcurrentRequests Int @default(5) // Max simultaneous requests per shop
-  rateLimitPerMinute    Int @default(60) // Requests per minute limit
-
-  // Emergency settings
-  fallbackMessage        String? // Message when AI is unavailable
-  manualChatNotification String? // Notify merchant of manual chat requests
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
   @@index([shop])
-}
-
-model ProductFAQ {
-  id       String @id @default(uuid())
-  question String
-  answer   String
-
-  // Link to Product
-  productId Int
-  product   Product @relation(fields: [productId], references: [id])
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([productId])
 }
 
 model Campaign {
-  id          String  @id @default(uuid())
-  shop        String // Links to the specific store
-  name        String // e.g., "Winter Collection", "Gift Guide"
-  description String? // Purpose: "For customers looking for holiday gifts"
-  isActive    Boolean @default(true)
-
-  // Triggers: specific words like "gift", "present", "dad", "winter"
+  id              String            @id @default(uuid())
+  shop            String
+  name            String
+  description     String?
+  isActive        Boolean           @default(true)
   triggerKeywords String[]
-
-  // Relation: The products inside this campaign
-  products CampaignProduct[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  products        CampaignProduct[]
 
   @@index([shop])
 }
 
-// Bridge Table: Links Campaigns to Products
 model CampaignProduct {
   id         String   @id @default(uuid())
   campaignId String
-  productId  String // The Shopify Product ID (e.g., "gid://shopify/Product/123")
-  // Optional: Override title/price for this specific campaign if needed
-  // specificNote String? 
+  productId  String
   campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 
-  @@unique([campaignId, productId]) // Prevent adding the same product twice in one campaign
+  @@unique([campaignId, productId])
   @@index([campaignId])
 }
 
@@ -347,13 +176,11 @@ model Discount {
   @@index([shop])
 }
 
-// Store-level FAQs (general knowledge for the AI chatbot)
-// Separate from ProductFAQ which is product-specific
 model FAQ {
   id        String   @id @default(uuid())
   shop      String
   question  String
-  answer    String   @db.Text
+  answer    String
   category  String   @default("General")
   sortOrder Int      @default(0)
   isActive  Boolean  @default(true)
@@ -362,4 +189,114 @@ model FAQ {
 
   @@index([shop])
   @@index([shop, category])
+}
+
+model AISettings {
+  id        String   @id
+  shop      String   @unique
+  settings  Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([shop])
+}
+
+model ChatbotCustomization {
+  id        String   @id
+  shop      String   @unique
+  settings  Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([shop])
+}
+
+model ChatConfiguration {
+  id                     String   @id
+  shop                   String   @unique
+  aiEnabled              Boolean  @default(true)
+  autoHandoffEnabled     Boolean  @default(true)
+  useKeywordResponses    Boolean  @default(true)
+  maxTokensPerResponse   Int      @default(500)
+  maxConcurrentRequests  Int      @default(5)
+  rateLimitPerMinute     Int      @default(60)
+  fallbackMessage        String?
+  manualChatNotification String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime
+
+  @@index([shop])
+}
+
+model Customer {
+  id          String        @id
+  shopifyId   String?       @unique
+  email       String
+  firstName   String?
+  lastName    String?
+  phone       String?
+  source      String        @default("SHOPIFY")
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime
+  shop        String
+  ChatSession ChatSession[]
+  Order       Order[]
+
+  @@unique([shop, email])
+  @@index([shop, email])
+}
+
+model MerchantPlan {
+  id                 String            @id
+  name               String            @unique
+  monthlyCredits     Int
+  maxConcurrentChats Int
+  price              Float
+  features           Json
+  isActive           Boolean           @default(true)
+  createdAt          DateTime          @default(now())
+  MerchantCredits    MerchantCredits[]
+}
+
+model Order {
+  id          String      @id
+  shopifyId   String      @unique
+  orderNumber String
+  status      String
+  totalPrice  Float
+  createdAt   DateTime
+  customerId  String
+  Customer    Customer    @relation(fields: [customerId], references: [id])
+  OrderItem   OrderItem[]
+}
+
+model OrderItem {
+  id          String  @id
+  productName String
+  quantity    Int
+  sku         String?
+  orderId     String
+  productId   String
+  Order       Order   @relation(fields: [orderId], references: [id])
+}
+
+model UsageLog {
+  id                String          @id
+  shop              String
+  merchantCreditsId String
+  requestType       String
+  creditsUsed       Int             @default(1)
+  sessionId         String?
+  customerId        String?
+  userMessage       String?
+  responseTime      Int?
+  tokensUsed        Int?
+  wasSuccessful     Boolean         @default(true)
+  errorMessage      String?
+  createdAt         DateTime        @default(now())
+  MerchantCredits   MerchantCredits @relation(fields: [merchantCreditsId], references: [id])
+
+  @@index([merchantCreditsId])
+  @@index([requestType])
+  @@index([shop, createdAt])
 }

@@ -130,7 +130,7 @@ export default function Policies({ policies: initialPolicies, hasScope: initialH
     };
 
     const handleRequestScope = async () => {
-        // @ts-ignore
+        // @ts-expect-error - Shopify global object typing mismatch
         const response = await window.shopify.scopes.request([
             "read_legal_policies",
             "write_legal_policies",
