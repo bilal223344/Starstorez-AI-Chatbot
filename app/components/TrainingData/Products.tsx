@@ -1,6 +1,8 @@
 import { CircleQuestionMark, StickyNote } from "lucide-react";
-import { useState } from "react";
-import { useSubmit } from "react-router";
+import { useState, useEffect } from "react";
+import { useFetcher, useSubmit } from "react-router";
+
+declare const shopify: any;
 
 interface Product {
     id: number;
@@ -20,54 +22,82 @@ interface FAQ {
     answer: string;
 }
 
-interface ProductsProps {
-    products: Product[];
-}
-
-export default function Products({ products }: ProductsProps) {
+export default function Products() {
+    const loader = useFetcher<{ tab: string; products: Product[] }>();
     const submit = useSubmit();
+
+    const [products, setProducts] = useState<Product[]>([]);
     const [activeProduct, setActiveProduct] = useState<Product | null>(null);
     const [searchTerm, setSearchTerm] = useState("");
-
-    // State for new FAQ form
     const [newQuestion, setNewQuestion] = useState("");
     const [newAnswer, setNewAnswer] = useState("");
 
+    // Self-load on mount
+    useEffect(() => {
+        if (loader.state === "idle" && !loader.data) {
+            loader.load("/app/trainingdata?tab=products");
+        }
+    }, []);
 
+    // Sync fetched data into local state
+    useEffect(() => {
+        if (loader.data?.products) {
+            setProducts(loader.data.products);
+        }
+    }, [loader.data]);
 
+    // Loading state
+    if (loader.state === "loading" || !loader.data) {
+        return (
+            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", padding: "60px 0" }}>
+                <s-spinner size="large"></s-spinner>
+            </div>
+        );
+    }
+
+    const filteredProducts = products.filter(p =>
+        p.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        p.vendor.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        p.tags.some(t => t.toLowerCase().includes(searchTerm.toLowerCase()))
+    );
 
     const handleFaqClick = (product: Product) => {
         setActiveProduct(product);
-        // The modal is opened via commandFor, so we just need to ensure state is set.
     };
 
     const handleCreateFaq = () => {
-        if (!activeProduct || !newQuestion || !newAnswer) return;
-
+        if (!activeProduct || !newQuestion.trim() || !newAnswer.trim()) return;
         const formData = new FormData();
-        formData.append("actionType", "create_faq");
+        formData.append("intent", "addFaq");
         formData.append("productId", activeProduct.id.toString());
         formData.append("question", newQuestion);
         formData.append("answer", newAnswer);
-
         submit(formData, { method: "post" });
+
+        // Optimistic update
+        const tempId = `temp-${Date.now()}`;
+        const newFaqItem: FAQ = { id: tempId, question: newQuestion, answer: newAnswer };
+        setProducts(prev => prev.map(p =>
+            p.id === activeProduct.id ? { ...p, faqs: [...p.faqs, newFaqItem] } : p
+        ));
+        setActiveProduct(prev => prev ? { ...prev, faqs: [...prev.faqs, newFaqItem] } : null);
         setNewQuestion("");
         setNewAnswer("");
-        // Close modal or keep open? Usually better to keep open to add more.
-        // We might want to close the "Add Question" modal though.
     };
 
     const handleDeleteFaq = (faqId: string) => {
+        if (!activeProduct) return;
         const formData = new FormData();
-        formData.append("actionType", "delete_faq");
+        formData.append("intent", "deleteFaq");
         formData.append("faqId", faqId);
         submit(formData, { method: "post" });
+
+        // Optimistic update
+        setProducts(prev => prev.map(p =>
+            p.id === activeProduct.id ? { ...p, faqs: p.faqs.filter(f => f.id !== faqId) } : p
+        ));
+        setActiveProduct(prev => prev ? { ...prev, faqs: prev.faqs.filter(f => f.id !== faqId) } : null);
     };
-
-
-
-
-    const filteredProducts = products.filter(p => p.title.toLowerCase().includes(searchTerm.toLowerCase()));
 
     return (
         <>
@@ -79,7 +109,7 @@ export default function Products({ products }: ProductsProps) {
                         <s-divider direction="block" />
 
                         <s-button-group gap="none">
-                            <s-button slot="secondary-actions" >Add Product</s-button>
+                            <s-button slot="secondary-actions">Add Product</s-button>
                             <s-button slot="secondary-actions">Import Products</s-button>
                             <s-button slot="secondary-actions">Sync All</s-button>
                         </s-button-group>
@@ -235,14 +265,9 @@ export default function Products({ products }: ProductsProps) {
                             <s-stack key={faq.id} background="strong" padding="small-200" border="base" borderRadius="base">
                                 <s-stack direction="inline" alignItems="center" justifyContent="space-between">
                                     <div style={{ width: "80%" }}>
-                                        {/* Edit Mode for specific FAQ? Simple version: just delete for now or new modal for edit. 
-                                            Let's support Edit by populating the "Add" modal or similar.
-                                            For simplicity, let's just allow Delete first, or use the same Add modal for Edit (requiring more state logic).
-                                        */}
                                         <s-heading>{faq.question}</s-heading>
                                     </div>
                                     <s-stack direction="inline" alignItems="center" gap="small-200">
-                                        {/* <s-button variant="tertiary" icon="edit" onClick={() => setEditingFaq(faq)} commandFor="add-faq-question-modal" command="--show"/> */}
                                         <s-button variant="tertiary" icon="delete" onClick={() => handleDeleteFaq(faq.id)} />
                                     </s-stack>
                                 </s-stack>
@@ -316,6 +341,5 @@ export default function Products({ products }: ProductsProps) {
                 </s-button>
             </s-modal>
         </>
-    )
+    );
 }
-

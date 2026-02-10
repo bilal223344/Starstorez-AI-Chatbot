@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useFetcher } from "react-router";
 
 interface Discount {
@@ -12,44 +12,58 @@ interface Discount {
     endsAt?: string | null;
 }
 
-interface DiscountProps {
-    initialDiscounts: Discount[];
-    hasScope: boolean;
-}
-
-export default function Discount({ initialDiscounts, hasScope }: DiscountProps) {
+export default function Discount() {
+    const loader = useFetcher<{ tab: string; discounts: Discount[]; hasDiscountScope: boolean }>();
     const fetcher = useFetcher();
-    // Use local state for optimistic updates
-    const [discounts, setDiscounts] = useState(initialDiscounts);
 
-    const handleToggle = (discountId: string, currentStatus: boolean) => {
-        const newStatus = !currentStatus;
+    const [discounts, setDiscounts] = useState<Discount[]>([]);
+    const [hasScope, setHasScope] = useState(false);
 
-        // Optimistic UI update
-        setDiscounts(prev => prev.map(d =>
-            d.id === discountId ? { ...d, isSuggested: newStatus } : d
-        ));
+    // Self-load on mount
+    useEffect(() => {
+        if (loader.state === "idle" && !loader.data) {
+            loader.load("/app/trainingdata?tab=discounts");
+        }
+    }, []);
 
-        fetcher.submit(
-            { actionType: "toggle_discount", id: discountId, isSuggested: String(newStatus) },
-            { method: "post" }
-        );
-    };
+    // Sync fetched data
+    useEffect(() => {
+        if (loader.data) {
+            setDiscounts(loader.data.discounts || []);
+            setHasScope(loader.data.hasDiscountScope ?? false);
+        }
+    }, [loader.data]);
 
-    const handleSync = () => {
-        fetcher.submit({ actionType: "sync_discounts" }, { method: "post" });
-    };
+    // Reload after sync action
+    useEffect(() => {
+        if (fetcher.state === "idle" && fetcher.data) {
+            loader.load("/app/trainingdata?tab=discounts");
+        }
+    }, [fetcher.state, fetcher.data]);
 
-    if (!hasScope) {
+    // Loading state
+    if (loader.state === "loading" || !loader.data) {
         return (
-            <s-stack padding="large" gap="large" background="subdued" border="large" borderStyle="dashed" borderRadius="base" justifyContent="center" alignItems="center">
-                <s-icon type="lock" />
-                <s-heading>Access Required</s-heading>
-                <s-text>Grant access to view and manage discounts.</s-text>
-                <s-button variant="primary" onClick={() => shopify.scopes.request(['read_discounts'])}>Grant Access</s-button>
-            </s-stack>
+            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", padding: "60px 0" }}>
+                <s-spinner size="large"></s-spinner>
+            </div>
         );
     }
+
+    const handleSync = () => {
+        fetcher.submit({ intent: "syncDiscounts" }, { method: "post" });
+    };
+
+    const handleToggle = (discountId: string, currentVal: boolean) => {
+        fetcher.submit(
+            { intent: "toggleDiscountSuggested", discountId, isSuggested: (!currentVal).toString() },
+            { method: "post" }
+        );
+        // Optimistic update
+        setDiscounts(prev => prev.map(d =>
+            d.id === discountId ? { ...d, isSuggested: !currentVal } : d
+        ));
+    };
 
     return (
         <s-stack gap="base">

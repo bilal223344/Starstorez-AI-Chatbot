@@ -10,50 +10,64 @@ interface BrandProfile {
     primaryDomain: string;
 }
 
-export default function Profile({ brandProfile }: { brandProfile: BrandProfile }) {
+export default function Profile() {
+    const loader = useFetcher<{ tab: string; brandProfile: BrandProfile }>();
     const fetcher = useFetcher<{ success: boolean; message: string }>();
+
     const [formData, setFormData] = useState({
-        story: brandProfile?.story || "",
-        location: brandProfile?.location || "",
-        website: brandProfile?.primaryDomain || "", // Use primaryDomain for website
-        storeType: brandProfile?.storeType || "online"
+        story: "",
+        location: "",
+        website: "",
+        storeType: "online",
+        primaryDomain: "",
     });
+    const [notification, setNotification] = useState<{ type: string; message: string } | null>(null);
 
-    const [notification, setNotification] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
-
+    // Self-load on mount
     useEffect(() => {
-        if (brandProfile) {
+        if (loader.state === "idle" && !loader.data) {
+            loader.load("/app/trainingdata?tab=profile");
+        }
+    }, []);
+
+    // Sync fetched data into form
+    useEffect(() => {
+        if (loader.data?.brandProfile) {
+            const bp = loader.data.brandProfile;
             setFormData({
-                story: brandProfile.story || "",
-                location: brandProfile.location || "",
-                website: brandProfile.primaryDomain || "",
-                storeType: brandProfile.storeType || "online"
+                story: bp.story || "",
+                location: bp.location || "",
+                website: bp.website || bp.primaryDomain || "",
+                storeType: bp.storeType || "online",
+                primaryDomain: bp.primaryDomain || "",
             });
         }
-    }, [brandProfile]);
+    }, [loader.data]);
 
+    // Handle save response
     useEffect(() => {
         if (fetcher.state === "idle" && fetcher.data) {
             if (fetcher.data.success) {
-                setNotification({ message: "Profile saved successfully", type: 'success' });
-            } else if (fetcher.data.message) {
-                setNotification({ message: `Error: ${fetcher.data.message}`, type: 'error' });
+                setNotification({ type: 'success', message: 'Brand profile saved successfully!' });
+            } else {
+                setNotification({ type: 'error', message: fetcher.data.message || 'Failed to save.' });
             }
-            // Auto hide after 3 seconds
-            const timer = setTimeout(() => setNotification(null), 3000);
-            return () => clearTimeout(timer);
+            setTimeout(() => setNotification(null), 3000);
         }
     }, [fetcher.state, fetcher.data]);
 
+    // Loading state
+    if (loader.state === "loading" || !loader.data) {
+        return (
+            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", padding: "60px 0" }}>
+                <s-spinner size="large"></s-spinner>
+            </div>
+        );
+    }
+
     const handleSave = () => {
         fetcher.submit(
-            {
-                actionType: "update_brand",
-                story: formData.story,
-                location: formData.location,
-                storeType: formData.storeType
-                // valid website is inferred from primary domain on server, or we just don't save it as a separate metafield anymore
-            },
+            { intent: "saveBrandProfile", ...formData },
             { method: "post" }
         );
     };
@@ -150,5 +164,5 @@ export default function Profile({ brandProfile }: { brandProfile: BrandProfile }
                 </s-grid>
             </s-stack>
         </s-stack>
-    )
+    );
 }

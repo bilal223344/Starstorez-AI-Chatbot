@@ -2,71 +2,67 @@ import { CircleCheckBig, FileText, Lock } from "lucide-react";
 import { useFetcher } from "react-router";
 import { useState, useEffect } from "react";
 
+// --- Types ---
 interface PolicyNode {
     id: string;
     title: string;
     body: string;
-    updatedAt: string;
+    updatedAt?: string;
     type: string;
     url: string;
 }
 
-interface PoliciesData {
-    shippingPolicy?: PolicyNode;
-    refundPolicy?: PolicyNode;
-    privacyPolicy?: PolicyNode;
-    termsOfService?: PolicyNode;
-    // Add other policy types if needed
-}
+// --- Helpers ---
+const formatDate = (dateStr?: string) => {
+    if (!dateStr) return "";
+    return new Date(dateStr).toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+    });
+};
 
-
-// Update mapped types safely
-interface PolicyCardProps {
+// --- PolicyCard Sub-Component ---
+function PolicyCard({
+    title,
+    type,
+    policy,
+    placeholder,
+}: {
     title: string;
+    type: string;
     policy?: PolicyNode;
-    type: string; // Explicit type required for creation
     placeholder: string;
-}
-
-function PolicyCard({ title, policy, type, placeholder }: PolicyCardProps) {
+}) {
     const fetcher = useFetcher();
     const [isEditing, setIsEditing] = useState(false);
     const [body, setBody] = useState(policy?.body || "");
+    const isSaving = fetcher.state !== "idle";
 
     useEffect(() => {
-        if (policy?.body) {
-            setBody(policy.body);
-        }
-    }, [policy]);
+        if (policy?.body) setBody(policy.body);
+    }, [policy?.body]);
 
-    const handleEdit = () => {
-        setIsEditing(true);
-    };
+    // After save completes, exit edit mode
+    useEffect(() => {
+        if (fetcher.state === "idle" && fetcher.data) {
+            setIsEditing(false);
+        }
+    }, [fetcher.state, fetcher.data]);
+
+    const handleEdit = () => setIsEditing(true);
 
     const handleCancel = () => {
-        setIsEditing(false);
         setBody(policy?.body || "");
+        setIsEditing(false);
     };
 
     const handleSave = () => {
-        // Use prop type if policy is undefined (creation mode)
-        const policyType = policy?.type || type;
-
-        const formData = new FormData();
-        formData.append("actionType", "update_policy");
-        formData.append("type", policyType);
-        formData.append("body", body);
-
-        fetcher.submit(formData, { method: "post" });
-        setIsEditing(false);
+        fetcher.submit(
+            { intent: "savePolicy", type, body },
+            { method: "post" }
+        );
     };
-
-    const formatDate = (dateString?: string) => {
-        if (!dateString) return "N/A";
-        return new Date(dateString).toLocaleDateString();
-    };
-
-    const isSaving = fetcher.state === "submitting";
 
     return (
         <s-stack direction="inline" gap="base" padding="base" border="base" borderRadius="base" background="subdued">
@@ -106,28 +102,59 @@ function PolicyCard({ title, policy, type, placeholder }: PolicyCardProps) {
     );
 }
 
-export default function Policies({ initialPolicies, hasScope }: { initialPolicies: PolicyNode[] | null, hasScope: boolean }) {
+// --- Main Component ---
+export default function Policies() {
+    const loader = useFetcher<{ tab: string; policies: PolicyNode[]; hasScope: boolean }>();
     const fetcher = useFetcher();
 
-    // Helper to find policy by type (handling the array from loader)
-    const getPolicy = (type: string) => {
-        if (Array.isArray(initialPolicies)) {
-            return initialPolicies.find((p: any) => p.type === type);
+    const [policies, setPolicies] = useState<PolicyNode[]>([]);
+    const [hasScope, setHasScope] = useState(false);
+
+    // Self-load on mount
+    useEffect(() => {
+        if (loader.state === "idle" && !loader.data) {
+            loader.load("/app/trainingdata?tab=policies");
         }
-        return undefined;
+    }, []);
+
+    // Sync fetched data
+    useEffect(() => {
+        if (loader.data) {
+            if (loader.data.policies) setPolicies(loader.data.policies);
+            if (loader.data.hasScope !== undefined) setHasScope(loader.data.hasScope);
+        }
+    }, [loader.data]);
+
+    // Handle sync completion — reload data
+    useEffect(() => {
+        if (fetcher.state === "idle" && fetcher.data) {
+            loader.load("/app/trainingdata?tab=policies");
+        }
+    }, [fetcher.state, fetcher.data]);
+
+    // Loading state
+    if (loader.state === "loading" || !loader.data) {
+        return (
+            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", padding: "60px 0" }}>
+                <s-spinner size="large"></s-spinner>
+            </div>
+        );
+    }
+
+    const getPolicy = (type: string) => {
+        return policies.find((p) => p.type === type);
     };
 
     const handleSync = () => {
-        fetcher.submit({ actionType: "sync_policy" }, { method: "post" });
+        fetcher.submit({ intent: "syncPolicies" }, { method: "post" });
     };
 
     const handleRequestScope = async () => {
-        const response = await shopify.scopes.request(['read_legal_policies', 'write_legal_policies']);
-        if (response.result === 'granted-all') {
-            // Redirect to update session
-            // access scope is updated but session needs refresh
-            // window.parent.location.href = `/auth?shop=${shop}`; // Re-enable if needed
-            // For now just log
+        const response = await (window as any).shopify.scopes.request([
+            "read_legal_policies",
+            "write_legal_policies",
+        ]);
+        if (response.result === "granted-all") {
             console.log("Scopes granted, please reload or wait for sync.");
         }
     };
@@ -196,5 +223,5 @@ export default function Policies({ initialPolicies, hasScope }: { initialPolicie
                 </s-grid>
             )}
         </s-stack>
-    )
+    );
 }

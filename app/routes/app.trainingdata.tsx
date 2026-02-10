@@ -1,4 +1,4 @@
-import { LoaderFunctionArgs, ActionFunctionArgs, useLoaderData } from "react-router";
+import { LoaderFunctionArgs, ActionFunctionArgs } from "react-router";
 import { authenticate } from "app/shopify.server";
 import prisma from "app/db.server";
 import { useState } from "react";
@@ -11,179 +11,188 @@ import { Database } from "lucide-react";
 import FAQs from "app/components/TrainingData/FAQs";
 
 // --- LOADER ---
+// Uses ?tab=X query param for lazy loading: each tab fetches only its own data.
 export const loader = async ({ request }: LoaderFunctionArgs) => {
     const { admin, session } = await authenticate.admin(request);
     const shop = session.shop;
+    const url = new URL(request.url);
+    const tab = url.searchParams.get("tab");
 
-    // 1. Fetch Synced Products with FAQs
-    const products = await prisma.product.findMany({
-        where: { shop },
-        include: { faqs: true },
-        orderBy: { title: 'asc' }
-    });
+    // --- TAB-SPECIFIC DATA LOADING ---
 
+    if (tab === "products") {
+        const products = await prisma.product.findMany({
+            where: { shop },
+            include: { faqs: true },
+            orderBy: { title: 'asc' }
+        });
+        return Response.json({ tab: "products", products });
+    }
 
-    // 2. Fetch Campaigns with Products
-    const campaigns = await prisma.campaign.findMany({
-        where: { shop },
-        include: { products: true }
-    });
-
-    // 3. Fetch Scopes (to check for read_discounts, read_legal_policies)
-    let currentScopes = session.scope || "";
-    try {
-        const scopesResponse = await admin.graphql(`
-            query {
-                currentAppInstallation {
-                    accessScopes {
-                        handle
-                    }
-                }
-            }
-        `);
-        const scopesJson = await scopesResponse.json();
-
-        interface AccessScope {
-            handle: string;
+    if (tab === "discounts") {
+        // Fetch scopes to check for read_discounts
+        let hasScope = false;
+        try {
+            const scopesResponse = await admin.graphql(`
+                query { currentAppInstallation { accessScopes { handle } } }
+            `);
+            const scopesJson = await scopesResponse.json();
+            interface AccessScope { handle: string; }
+            const grantedScopes = (scopesJson.data?.currentAppInstallation?.accessScopes || []).map((s: AccessScope) => s.handle);
+            hasScope = grantedScopes.includes("read_discounts");
+        } catch (e) {
+            console.error("Failed to fetch access scopes for discounts", e);
         }
 
-        const grantedScopes = (scopesJson.data?.currentAppInstallation?.accessScopes || []).map((s: AccessScope) => s.handle);
-
-        // Update currentScopes to reflect reality
-        currentScopes = grantedScopes.join(",");
-
-    } catch (e) {
-        console.error("Failed to fetch access scopes", e);
+        const discounts = await prisma.discount.findMany({
+            where: { shop },
+            orderBy: { createdAt: 'desc' }
+        });
+        return Response.json({ tab: "discounts", discounts, hasDiscountScope: hasScope });
     }
 
-    // 4. Fetch Policies (Only if we have scope)
-    interface ShopPolicy {
-        id: string;
-        title: string;
-        body: string;
-        url: string;
-        type: string;
+    if (tab === "policies") {
+        // Fetch scopes to check for read/write_legal_policies
+        let hasScope = false;
+        let currentScopes = "";
+        try {
+            const scopesResponse = await admin.graphql(`
+                query { currentAppInstallation { accessScopes { handle } } }
+            `);
+            const scopesJson = await scopesResponse.json();
+            interface AccessScope { handle: string; }
+            const grantedScopes = (scopesJson.data?.currentAppInstallation?.accessScopes || []).map((s: AccessScope) => s.handle);
+            currentScopes = grantedScopes.join(",");
+            hasScope = currentScopes.includes("read_legal_policies") && currentScopes.includes("write_legal_policies");
+        } catch (e) {
+            console.error("Failed to fetch access scopes for policies", e);
+        }
+
+        interface ShopPolicy {
+            id: string;
+            title: string;
+            body: string;
+            url: string;
+            type: string;
+        }
+        let policies: ShopPolicy[] = [];
+
+        if (hasScope) {
+            try {
+                const response = await admin.graphql(`
+                    query {
+                        shop {
+                            shopPolicies {
+                                id
+                                title
+                                body
+                                url
+                                type
+                            }
+                        }
+                    }
+                `);
+                const responseJson = await response.json();
+                policies = (responseJson.data?.shop?.shopPolicies || []) as ShopPolicy[];
+            } catch (e: unknown) {
+                console.error("Failed to fetch policies", e);
+                const error = e as Error;
+                if (error.message?.includes("Access denied") || JSON.stringify(error).includes("Access denied")) {
+                    console.warn("Access denied for policies, marking scope as missing.");
+                    hasScope = false;
+                }
+            }
+        }
+
+        return Response.json({ tab: "policies", policies, hasScope });
     }
 
-    let policies: ShopPolicy[] = [];
-    if (currentScopes.includes("read_legal_policies")) {
+    if (tab === "faqs") {
+        // Auto-seed defaults on first visit
+        const faqCount = await prisma.fAQ.count({ where: { shop } });
+        if (faqCount === 0) {
+            await prisma.fAQ.createMany({
+                data: [
+                    {
+                        shop,
+                        question: "How do I track my order?",
+                        answer: "You can track your order by clicking the link in your confirmation email or logging into your account.",
+                        category: "Shipping",
+                        sortOrder: 0,
+                    },
+                    {
+                        shop,
+                        question: "What is your return policy?",
+                        answer: "We accept returns within 30 days of purchase. Items must be unused and in original packaging.",
+                        category: "Returns",
+                        sortOrder: 1,
+                    },
+                    {
+                        shop,
+                        question: "Do you ship internationally?",
+                        answer: "Yes, we ship to over 50 countries worldwide. Shipping rates calculate at checkout.",
+                        category: "Shipping",
+                        sortOrder: 2,
+                    },
+                    {
+                        shop,
+                        question: "Are your products sustainable?",
+                        answer: "Yes, we source 100% recycled materials for our packaging and prioritize eco-friendly manufacturing.",
+                        category: "Product",
+                        sortOrder: 3,
+                    },
+                ],
+            });
+        }
+
+        const faqs = await prisma.fAQ.findMany({
+            where: { shop },
+            orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }]
+        });
+        return Response.json({ tab: "faqs", faqs });
+    }
+
+    if (tab === "recommendations") {
+        const campaigns = await prisma.campaign.findMany({
+            where: { shop },
+            include: { products: true }
+        });
+        const products = await prisma.product.findMany({
+            where: { shop },
+            orderBy: { title: 'asc' }
+        });
+        return Response.json({ tab: "recommendations", campaigns, products });
+    }
+
+    if (tab === "profile") {
+        let brandProfile = {};
         try {
             const response = await admin.graphql(`
-            query {
-                shop {
-                    shopPolicies {
-                        id
-                        title
-                        body
-                        url
-                        type
+                query {
+                    shop {
+                        primaryDomain { url }
+                        brandStory: metafield(namespace: "ai_context", key: "story") { value }
+                        brandLocation: metafield(namespace: "ai_context", key: "location") { value }
+                        brandStoreType: metafield(namespace: "ai_context", key: "store_type") { value }
                     }
                 }
-            }
-        `);
+            `);
             const responseJson = await response.json();
-            policies = (responseJson.data?.shop?.shopPolicies || []) as ShopPolicy[];
-        } catch (e: unknown) {
-            console.error("Failed to fetch policies", e);
-            const error = e as Error;
-            // If access denied, strip the scope so the UI knows to ask for it again
-            if (error.message?.includes("Access denied") || JSON.stringify(error).includes("Access denied")) {
-                console.warn("Access denied for policies, marking scope as missing.");
-                // We manually remove it to force UI to show grant button if the token is invalid
-                currentScopes = currentScopes.replace(/read_legal_policies/g, "").replace(/write_legal_policies/g, "");
-            }
+            const shopData = responseJson.data?.shop || {};
+            brandProfile = {
+                story: shopData.brandStory?.value || "",
+                location: shopData.brandLocation?.value || "",
+                storeType: shopData.brandStoreType?.value || "online",
+                primaryDomain: shopData.primaryDomain?.url || ""
+            };
+        } catch (e) {
+            console.error("Failed to fetch brand metafields", e);
         }
+        return Response.json({ tab: "profile", brandProfile });
     }
 
-    // 5. Fetch Discounts from DB
-    const discounts = await prisma.discount.findMany({
-        where: { shop },
-        orderBy: { createdAt: 'desc' }
-    });
-
-
-
-    // 6. Fetch Brand Metafields
-    let brandProfile = {};
-    try {
-        const response = await admin.graphql(`
-            query {
-                shop {
-                    primaryDomain { url }
-                    brandStory: metafield(namespace: "ai_context", key: "story") { value }
-                    brandLocation: metafield(namespace: "ai_context", key: "location") { value }
-                    brandStoreType: metafield(namespace: "ai_context", key: "store_type") { value }
-                }
-            }
-        `);
-        const responseJson = await response.json();
-        console.log("[Loader] Brand Metafields Response:", JSON.stringify(responseJson));
-        const shopData = responseJson.data?.shop || {};
-        brandProfile = {
-            story: shopData.brandStory?.value || "",
-            location: shopData.brandLocation?.value || "",
-            storeType: shopData.brandStoreType?.value || "online",
-            primaryDomain: shopData.primaryDomain?.url || ""
-        };
-    } catch (e) {
-        console.error("Failed to fetch brand metafields", e);
-    }
-
-
-
-    // 6. Fetch Store-level FAQs (auto-seed defaults on first visit)
-    const faqCount = await prisma.fAQ.count({ where: { shop } });
-
-    if (faqCount === 0) {
-        await prisma.fAQ.createMany({
-            data: [
-                {
-                    shop,
-                    question: "How do I track my order?",
-                    answer: "You can track your order by clicking the link in your confirmation email or logging into your account.",
-                    category: "Shipping",
-                    sortOrder: 0,
-                },
-                {
-                    shop,
-                    question: "What is your return policy?",
-                    answer: "We accept returns within 30 days of purchase. Items must be unused and in original packaging.",
-                    category: "Returns",
-                    sortOrder: 1,
-                },
-                {
-                    shop,
-                    question: "Do you ship internationally?",
-                    answer: "Yes, we ship to over 50 countries worldwide. Shipping rates calculate at checkout.",
-                    category: "Shipping",
-                    sortOrder: 2,
-                },
-                {
-                    shop,
-                    question: "Are your products sustainable?",
-                    answer: "Yes, we source 100% recycled materials for our packaging and prioritize eco-friendly manufacturing.",
-                    category: "Product",
-                    sortOrder: 3,
-                },
-            ],
-        });
-    }
-
-    const faqs = await prisma.fAQ.findMany({
-        where: { shop },
-        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }]
-    });
-
-    return Response.json({
-        products,
-        campaigns,
-        currentScopes,
-        policies,
-        discounts,
-        brandProfile,
-        faqs,
-        shop
-    });
+    // Default: no tab param → initial page load, return only shop
+    return Response.json({ shop });
 };
 
 // --- ACTION ---
@@ -303,17 +312,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             const campaignId = formData.get("campaignId") as string;
             const productIds = JSON.parse(formData.get("productIds") as string); // Array of GID strings
 
-            // We store the GID as 'productId' in CampaignProduct.
-            // Note: Our local Product model uses 'prodId' for the GID.
-            // When we use the ResourcePicker, we get GIDs.
-
-            // We want to avoid duplicates.
-            // We can do createMany with skipDuplicates if supported, or loop.
-            // SQLite/Postgres support varies for skipDuplicates on unique constraints in Prisma... 
-            // Better to loop or filter first.
-
             for (const pid of productIds) {
-                // Check if exists
                 const exists = await prisma.campaignProduct.findUnique({
                     where: { campaignId_productId: { campaignId, productId: pid } }
                 });
@@ -643,30 +642,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
 
 export default function TrainingData() {
-    const { products, campaigns, currentScopes, policies, discounts, brandProfile, faqs } = useLoaderData<typeof loader>();
     const [activeTab, setActiveTab] = useState("products");
-    console.log("[CURRENT SCOPE]", currentScopes)
-    // Simple tab implementation without external library to match existing styles
-    // Or we could use Shopify Polaris Tabs if we were using purely Polaris structure, 
-    // but the provided code used custom <s-button> tags. I will stick to the existing style 
-    // but add logic.
 
     const renderContent = () => {
         switch (activeTab) {
             case "products":
-                return <Products products={products} />;
-            case "discount":
-                return <Discount initialDiscounts={discounts} hasScope={currentScopes.includes("read_discounts")} />;
+                return <Products />;
+            case "discounts":
+                return <Discount />;
             case "policies":
-                return <Policies initialPolicies={policies} hasScope={currentScopes.includes("read_legal_policies") && currentScopes.includes("write_legal_policies")} />;
+                return <Policies />;
             case "recommendations":
-                return <ProductRecommendations campaigns={campaigns} allProducts={products} />;
+                return <ProductRecommendations />;
             case "profile":
-                return <Profile brandProfile={brandProfile} />;
+                return <Profile />;
             case "faqs":
-                return <FAQs faqs={faqs} />;
+                return <FAQs />;
             default:
-                return <Products products={products} />;
+                return <Products />;
         }
     };
 
@@ -695,18 +688,18 @@ export default function TrainingData() {
                     {/* Tabs */}
                     <s-grid gridTemplateColumns="1fr 1fr 1fr" border="base" borderWidth="base none none none" paddingBlockStart="base">
                         <s-stack direction="inline" justifyContent="center" gap="large">
-                            <s-button icon="package" onClick={() => setActiveTab("products")} active={activeTab === "products"}>Products</s-button>
-                            <s-button icon="discount" onClick={() => setActiveTab("discount")} active={activeTab === "discount"}>Discount</s-button>
+                            <s-button icon="package" onClick={() => setActiveTab("products")} pressed={activeTab === "products"}>Products</s-button>
+                            <s-button icon="discount" onClick={() => setActiveTab("discounts")} pressed={activeTab === "discounts"}>Discount</s-button>
                             <s-button icon="globe-lines" onClick={() => setActiveTab("market")} disabled>Market</s-button>
                         </s-stack>
                         <s-stack border="base" borderWidth="none base none base" borderColor="strong" direction="inline" justifyContent="center" gap="large">
-                            <s-button icon="info" onClick={() => setActiveTab("faqs")}>FAQs</s-button>
-                            <s-button icon="shield-check-mark" onClick={() => setActiveTab("policies")} active={activeTab === "policies"}>Policies</s-button>
+                            <s-button icon="info" onClick={() => setActiveTab("faqs")} pressed={activeTab === "faqs"}>FAQs</s-button>
+                            <s-button icon="shield-check-mark" onClick={() => setActiveTab("policies")} pressed={activeTab === "policies"}>Policies</s-button>
                             <s-button icon="receipt" onClick={() => setActiveTab("documents")} disabled>Documents</s-button>
                         </s-stack>
                         <s-stack direction="inline" justifyContent="center" gap="large">
-                            <s-button icon="profile" onClick={() => setActiveTab("profile")} active={activeTab === "profile"}>Profile</s-button>
-                            <s-button icon="star" onClick={() => setActiveTab("recommendations")} active={activeTab === "recommendations"}>Recommendations</s-button>
+                            <s-button icon="profile" onClick={() => setActiveTab("profile")} pressed={activeTab === "profile"}>Profile</s-button>
+                            <s-button icon="star" onClick={() => setActiveTab("recommendations")} pressed={activeTab === "recommendations"}>Recommendations</s-button>
                         </s-stack>
                     </s-grid>
                 </s-stack>

@@ -11,7 +11,7 @@ interface FAQ {
     isActive: boolean;
 }
 
-interface FAQFormState {
+interface FAQFormData {
     question: string;
     answer: string;
     category: string;
@@ -19,49 +19,68 @@ interface FAQFormState {
 
 const CATEGORIES = ["General", "Shipping", "Returns", "Product", "Payment", "Account"];
 
-const DEFAULT_FORM: FAQFormState = { question: "", answer: "", category: "General" };
+export default function FAQs() {
+    const loader = useFetcher<{ tab: string; faqs: FAQ[] }>();
+    const fetcher = useFetcher<{ success: boolean; faq?: FAQ; message?: string }>();
 
-// --- Component ---
-export default function FAQs({ faqs }: { faqs: FAQ[] }) {
-    const fetcher = useFetcher<{ success: boolean; message: string }>();
-    const [searchQuery, setSearchQuery] = useState("");
+    const [faqs, setFaqs] = useState<FAQ[]>([]);
     const [editingFaq, setEditingFaq] = useState<FAQ | null>(null);
+    const [formData, setFormData] = useState<FAQFormData>({ question: "", answer: "", category: "General" });
+    const [searchQuery, setSearchQuery] = useState("");
     const [deleteTarget, setDeleteTarget] = useState<FAQ | null>(null);
-    const [formData, setFormData] = useState<FAQFormState>(DEFAULT_FORM);
-    const [notification, setNotification] = useState<{ message: string; tone: "success" | "critical" } | null>(null);
+    const [notification, setNotification] = useState<{ tone: string; message: string } | null>(null);
 
-    // --- Effects ---
+    // Self-load on mount
     useEffect(() => {
-        if (fetcher.state === "idle" && fetcher.data) {
-            if (fetcher.data.success) {
-                setNotification({ message: fetcher.data.message || "Done!", tone: "success" });
-                setEditingFaq(null);
-                setDeleteTarget(null);
-                setFormData(DEFAULT_FORM);
-            } else {
-                setNotification({ message: fetcher.data.message || "Something went wrong", tone: "critical" });
-            }
-            const timer = setTimeout(() => setNotification(null), 4000);
-            return () => clearTimeout(timer);
+        if (loader.state === "idle" && !loader.data) {
+            loader.load("/app/trainingdata?tab=faqs");
+        }
+    }, []);
+
+    // Sync fetched data
+    useEffect(() => {
+        if (loader.data?.faqs) {
+            setFaqs(loader.data.faqs);
+        }
+    }, [loader.data]);
+
+    // Handle CRUD action responses
+    useEffect(() => {
+        if (fetcher.state === "idle" && fetcher.data?.success) {
+            loader.load("/app/trainingdata?tab=faqs");
+            setNotification({ tone: "success", message: editingFaq ? "FAQ updated!" : "FAQ saved!" });
+            resetForm();
+            setTimeout(() => setNotification(null), 3000);
         }
     }, [fetcher.state, fetcher.data]);
 
-    // --- Filtering ---
+    const isBusy = fetcher.state !== "idle";
+
+    const resetForm = () => {
+        setEditingFaq(null);
+        setFormData({ question: "", answer: "", category: "General" });
+    };
+
     const filteredFaqs = useMemo(() => {
-        if (!searchQuery.trim()) return faqs;
-        const q = searchQuery.toLowerCase();
-        return faqs.filter(
-            (f) =>
-                f.question.toLowerCase().includes(q) ||
-                f.answer.toLowerCase().includes(q) ||
-                f.category.toLowerCase().includes(q)
-        );
+        return faqs.filter(faq => {
+            const matchesSearch = !searchQuery ||
+                faq.question.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                faq.answer.toLowerCase().includes(searchQuery.toLowerCase());
+            return matchesSearch;
+        });
     }, [faqs, searchQuery]);
 
-    // --- Handlers ---
+    // Loading state
+    if (loader.state === "loading" || !loader.data) {
+        return (
+            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", padding: "60px 0" }}>
+                <s-spinner size="large"></s-spinner>
+            </div>
+        );
+    }
+
     const openCreate = () => {
-        setEditingFaq(null);
-        setFormData(DEFAULT_FORM);
+        resetForm();
     };
 
     const openEdit = (faq: FAQ) => {
@@ -71,31 +90,26 @@ export default function FAQs({ faqs }: { faqs: FAQ[] }) {
 
     const handleSave = () => {
         if (!formData.question.trim() || !formData.answer.trim()) return;
-
+        const data: Record<string, string> = {
+            intent: editingFaq ? "editGeneralFaq" : "addGeneralFaq",
+            question: formData.question,
+            answer: formData.answer,
+            category: formData.category,
+        };
         if (editingFaq) {
-            fetcher.submit(
-                { actionType: "update_store_faq", faqId: editingFaq.id, ...formData },
-                { method: "post" }
-            );
-        } else {
-            fetcher.submit(
-                { actionType: "create_store_faq", ...formData },
-                { method: "post" }
-            );
+            data.faqId = editingFaq.id;
         }
+        fetcher.submit(data, { method: "post" });
     };
 
     const handleDelete = () => {
         if (!deleteTarget) return;
-        fetcher.submit(
-            { actionType: "delete_store_faq", faqId: deleteTarget.id },
-            { method: "post" }
-        );
+        fetcher.submit({ intent: "deleteGeneralFaq", faqId: deleteTarget.id }, { method: "post" });
+        setDeleteTarget(null);
+        setNotification({ tone: "success", message: "FAQ deleted." });
+        setTimeout(() => setNotification(null), 3000);
     };
 
-    const isBusy = fetcher.state !== "idle";
-
-    // --- Render ---
     return (
         <>
             {/* Notification Banner */}
