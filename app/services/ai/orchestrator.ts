@@ -213,7 +213,7 @@ export async function processChatTurn(
     });
 
     // Convert SQL history to Gemini format
-    const history = (session.messages || []).map((m) => ({
+    const history = ((session.messages || []) as any[]).map((m: any) => ({
       role: m.role === "assistant" ? "model" : "user",
       parts: [{ text: m.content }],
     }));

@@ -1,40 +1,37 @@
-import { ChatResult, ChatProduct } from "app/types/chat.types";
+import { ChatResult, ChatProduct, AIMessage, ChatSessionWithMessages } from "app/types/chat.types";
 import { getOrCreateSession, saveChatTurn } from "app/services/db/chat.db";
 import { generateAIResponse } from "app/services/ai/ai.service";
 import { searchPinecone } from "../search/pinecone.service";
-
-import { ChatCompletionMessageToolCall } from "openai/resources/chat/completions";
 
 export async function processChat(
     shop: string,
     custMail: string,
     userMessage: string
 ): Promise<ChatResult> {
-    const startTime = Date.now();
-
     try {
         // 1. Session Setup (DB Layer)
-        const { session } = await getOrCreateSession(shop, custMail);
+        const sessionResult = await getOrCreateSession(shop, custMail);
+        const session = (sessionResult as { session: ChatSessionWithMessages }).session;
 
-        // 2. Prepare History (Format for OpenAI)
-        const history = session.messages.map(m => ({
+        // 2. Prepare History
+        const history: AIMessage[] = session.messages.map((m) => ({
             role: m.role as "user" | "assistant",
             content: m.content
         }));
 
-        // 3. First AI Pass (AI Layer)
-        let aiResponse = await generateAIResponse(
-            [...history, { role: "user", content: userMessage }] as any,
+        // 3. First AI Pass
+        const aiResponse = await generateAIResponse(
+            [...history, { role: "user", content: userMessage }],
             shop
         );
         let finalAiText = aiResponse.content || "";
         let productsFound: ChatProduct[] = [];
 
-        // 4. Handle Tool Calls (Search Layer)
+        // 4. Handle Tool Calls
         if (aiResponse.tool_calls) {
             // We only handle one tool type for now
-            const toolCall = aiResponse.tool_calls[0] as ChatCompletionMessageToolCall;
-            const args = JSON.parse((toolCall as any).function.arguments);
+            const toolCall = aiResponse.tool_calls[0];
+            const args = JSON.parse(toolCall.function.arguments);
             console.log(`[Chat-Proc] Tool Call: ${JSON.stringify(args)}`);
 
             console.log(`[Chat-Proc] Executing Search: ${args.search_query}`);
@@ -47,7 +44,7 @@ export async function processChat(
                 args.max_price,
                 args.sort
             );
-            searchResult.matches.map(m => console.log("[PINECONE RESULT]", m))
+
             // Map results
             productsFound = searchResult.matches.map(m => ({
                 id: String(m.metadata?.product_id || m.id),
@@ -60,14 +57,19 @@ export async function processChat(
 
             // 5. Second AI Pass (with products)
             // We construct a "tool" message response and feed it back to AI
-            const toolMessage = {
+            const toolMessage: AIMessage = {
                 role: "tool",
                 tool_call_id: toolCall.id,
-                content: JSON.stringify(productsFound) // Simplified for brevity
+                content: JSON.stringify(productsFound)
             };
 
             const secondPass = await generateAIResponse(
-                [...history, { role: "user", content: userMessage }, aiResponse, toolMessage],
+                [
+                    ...history,
+                    { role: "user", content: userMessage },
+                    aiResponse as AIMessage,
+                    toolMessage
+                ],
                 shop
             );
             finalAiText = secondPass.content || "";
@@ -87,15 +89,16 @@ export async function processChat(
             products: productsFound,
         };
 
-    } catch (error: any) {
+    } catch (error) {
         console.error("[Chat-Proc] Error:", error);
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
         return {
             success: false,
             sessionId: "",
             responseType: "AI",
             userMessage: { role: "user", content: userMessage },
             assistantMessage: { role: "assistant", content: "I encountered an error." },
-            error: error.message
+            error: errorMessage
         };
     }
 }

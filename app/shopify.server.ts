@@ -43,7 +43,7 @@ const shopify = shopifyApp({
           create: {
             shop: session.shop,
             settings: DEFAULT_CHATBOT_SETTINGS as unknown as Prisma.InputJsonValue,
-          },
+          } as any,
         });
         console.log(`[Install] Default settings saved successfully.`);
       } catch (error) {

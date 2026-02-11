@@ -14,6 +14,29 @@ export interface ChatProduct {
     description?: string;
 }
 
+export interface AIMessage {
+    role: "user" | "assistant" | "tool";
+    content?: string | null;
+    tool_calls?: {
+        id: string;
+        type: string;
+        function: {
+            name: string;
+            arguments: string;
+        }
+    }[] | null;
+    tool_call_id?: string;
+}
+
+export interface ChatSessionWithMessages {
+    id: string;
+    messages: {
+        role: string;
+        content: string;
+        createdAt: Date;
+    }[];
+}
+
 export interface ChatResult {
     success: boolean;
     sessionId: string;
@@ -22,7 +45,7 @@ export interface ChatResult {
     assistantMessage: { role: "assistant"; content: string };
     products?: ChatProduct[];
     error?: string;
-    debugInfo?: any;
+    debugInfo?: Record<string, unknown>;
 }
 
 // Params for the history fetcher

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { LoaderFunctionArgs, ActionFunctionArgs, useLoaderData, useSubmit, useNavigation, useFetcher } from "react-router";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import { LanguageSettings, LanguageSettingsData } from "../components/AIPersonalityAndBehavior/LanguageSettings";
+import { Prisma } from "@prisma/client";
 import { MessageSquare, Sparkles, Lock, User, Bot, MessageCircle, Signal, Wifi, Battery, MoreHorizontal, Plus, Send } from "lucide-react";
 
 export interface AISettingsType {
@@ -35,19 +35,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const intent = formData.get("intent");
 
     if (intent === "optimize") {
-        const { optimizeAISettings } = await import("../services/ai/optimizer.server.ts");
+        const { optimizeAISettings } = await import("../services/ai/optimizer.server");
         const optimizedSettings = await optimizeAISettings(session.shop);
         return { status: "success", settings: optimizedSettings };
     }
 
-    const settings = JSON.parse(formData.get("settings") as string);
+    const settings = JSON.parse(formData.get("settings") as string) as unknown as AISettingsType;
 
     await prisma.aISettings.upsert({
         where: { shop: session.shop },
-        update: { settings },
+        update: { settings: settings as unknown as Prisma.InputJsonObject },
         create: {
             shop: session.shop,
-            settings
+            settings: settings as unknown as Prisma.InputJsonObject
         }
     });
 
@@ -88,10 +88,8 @@ export default function Instructions() {
     const [allowEmojis, setAllowEmojis] = useState(aiSettings.allowEmojis || false);
 
     // Language Settings
-    const [languageData, setLanguageData] = useState<LanguageSettingsData>({
-        primaryLanguage: aiSettings.primaryLanguage || "english",
-        autoDetect: aiSettings.autoDetect ?? true
-    });
+    const [primaryLanguage, setPrimaryLanguage] = useState(aiSettings.primaryLanguage || "english");
+    const [autoDetect, setAutoDetect] = useState(aiSettings.autoDetect ?? true);
 
     // Behaviors
     const [behaviors, setBehaviors] = useState<string[]>(aiSettings.behaviors || []);
@@ -152,8 +150,8 @@ export default function Instructions() {
             toneOfVoice,
             responseLength,
             allowEmojis,
-            primaryLanguage: languageData.primaryLanguage,
-            autoDetect: languageData.autoDetect,
+            primaryLanguage,
+            autoDetect,
             behaviors
         };
 
@@ -165,7 +163,7 @@ export default function Instructions() {
     };
 
     return (
-        <s-grid gridTemplateColumns="8fr 4fr" gap="base">
+        <s-grid gridTemplateColumns="1fr auto" gap="base">
             <s-grid-item>
                 <s-page heading="Instructions">
                     <s-button
@@ -192,7 +190,7 @@ export default function Instructions() {
                                 placeholder="Startstorez"
                                 maxLength={20}
                                 value={assistantName}
-                                onInput={(e: any) => setAssistantName(e.target.value)}
+                                onInput={(e) => setAssistantName((e.target as HTMLInputElement).value)}
                             />
                         </s-grid>
 
@@ -200,19 +198,17 @@ export default function Instructions() {
                             <s-text>Base Persona</s-text>
                             <s-grid gridTemplateColumns="1fr 1fr 1fr" gap="base">
                                 <s-clickable
-                                    border={basePersona === "support_agent" ? "base-dark" : "base"}
+                                    border={basePersona === "support_agent" ? "large-100" : "base"}
                                     borderRadius="base"
                                     padding="base"
-                                    background={basePersona === "support_agent" ? "subdued" : "surface"}
+                                    background={basePersona === "support_agent" ? "subdued" : "base"}
                                     inlineSize="100%"
                                     onClick={() => setBasePersona("support_agent")}
                                 >
                                     <s-grid gridTemplateColumns="1fr auto" alignItems="stretch" gap="base">
                                         <s-box>
                                             <s-heading>Support Agent</s-heading>
-                                            <s-paragraph>
-                                                Patient, Problem Solver
-                                            </s-paragraph>
+                                            <s-paragraph>Patient, Problem Solver</s-paragraph>
                                         </s-box>
                                         <s-stack justifyContent="start">
                                             <s-icon type={basePersona === "support_agent" ? "check-circle" : "circle"} />
@@ -221,19 +217,17 @@ export default function Instructions() {
                                 </s-clickable>
 
                                 <s-clickable
-                                    border={basePersona === "sales_associate" ? "base-dark" : "base"}
+                                    border={basePersona === "sales_associate" ? "large-100" : "base"}
                                     borderRadius="base"
                                     padding="base"
-                                    background={basePersona === "sales_associate" ? "subdued" : "surface"}
+                                    background={basePersona === "sales_associate" ? "subdued" : "base"}
                                     inlineSize="100%"
                                     onClick={() => setBasePersona("sales_associate")}
                                 >
                                     <s-grid gridTemplateColumns="1fr auto" alignItems="stretch" gap="base">
                                         <s-box>
                                             <s-heading>Sales Associate</s-heading>
-                                            <s-paragraph>
-                                                Persuasive, Proactive
-                                            </s-paragraph>
+                                            <s-paragraph>Persuasive, Proactive</s-paragraph>
                                         </s-box>
                                         <s-stack justifyContent="start">
                                             <s-icon type={basePersona === "sales_associate" ? "check-circle" : "circle"} />
@@ -242,19 +236,17 @@ export default function Instructions() {
                                 </s-clickable>
 
                                 <s-clickable
-                                    border={basePersona === "brand_ambassador" ? "base-dark" : "base"}
+                                    border={basePersona === "brand_ambassador" ? "large-100" : "base"}
                                     borderRadius="base"
                                     padding="base"
-                                    background={basePersona === "brand_ambassador" ? "subdued" : "surface"}
+                                    background={basePersona === "brand_ambassador" ? "subdued" : "base"}
                                     inlineSize="100%"
                                     onClick={() => setBasePersona("brand_ambassador")}
                                 >
                                     <s-grid gridTemplateColumns="1fr auto" alignItems="stretch" gap="base">
                                         <s-box>
                                             <s-heading>Brand Ambassador</s-heading>
-                                            <s-paragraph>
-                                                On-brand, Storytelling
-                                            </s-paragraph>
+                                            <s-paragraph>On-brand, Storytelling</s-paragraph>
                                         </s-box>
                                         <s-stack justifyContent="start">
                                             <s-icon type={basePersona === "brand_ambassador" ? "check-circle" : "circle"} />
@@ -269,16 +261,35 @@ export default function Instructions() {
                                 label="Custom Instructions"
                                 details="Refine the persona with specific details about your brand voice."
                                 placeholder="You are an enthusiastic sales associate. Focus on recommending products, upselling, and closing sales."
-                                maxLength={200}
+                                maxLength={500}
                                 rows={5}
                                 value={customInstructions}
-                                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                                onInput={(e: any) => setCustomInstructions(e.target.value)}
+                                onInput={(e) => setCustomInstructions((e.target as HTMLTextAreaElement).value)}
                             />
                         </s-stack>
                     </s-section>
 
-                    <LanguageSettings data={languageData} setData={setLanguageData} />
+                    <s-section heading="Language Settings">
+                        <s-stack gap="small-200">
+                            <s-select
+                                label="Primary Language"
+                                details="When selected, the chatbot will automatically generate responses in the merchant-selected language."
+                                value={primaryLanguage}
+                                onInput={(e) => setPrimaryLanguage((e.target as HTMLSelectElement).value)}
+                            >
+                                <s-option value="english">English</s-option>
+                                <s-option value="french">French</s-option>
+                                <s-option value="german">German</s-option>
+                            </s-select>
+
+                            <s-switch
+                                label="Default Behavior"
+                                details="Auto-detect customer language"
+                                checked={autoDetect}
+                                onChange={() => setAutoDetect(!autoDetect)}
+                            />
+                        </s-stack>
+                    </s-section>
 
                     <s-section heading="Communication Style">
                         <s-stack gap="base">
@@ -286,22 +297,22 @@ export default function Instructions() {
                                 <s-text>Tone of Voice</s-text>
                                 <s-button-group gap="none">
                                     <s-button
+                                        slot="secondary-actions"
                                         icon={toneOfVoice === "friendly" ? "check" : undefined}
-                                        variant={toneOfVoice === "friendly" ? "primary" : undefined}
                                         onClick={() => setToneOfVoice("friendly")}
                                     >
                                         Friendly
                                     </s-button>
                                     <s-button
+                                        slot="secondary-actions"
                                         icon={toneOfVoice === "professional" ? "check" : undefined}
-                                        variant={toneOfVoice === "professional" ? "primary" : undefined}
                                         onClick={() => setToneOfVoice("professional")}
                                     >
                                         Professional
                                     </s-button>
                                     <s-button
+                                        slot="secondary-actions"
                                         icon={toneOfVoice === "enthusiastic" ? "check" : undefined}
-                                        variant={toneOfVoice === "enthusiastic" ? "primary" : undefined}
                                         onClick={() => setToneOfVoice("enthusiastic")}
                                     >
                                         Enthusiastic
@@ -313,22 +324,22 @@ export default function Instructions() {
                                 <s-text>Response Length</s-text>
                                 <s-button-group gap="none">
                                     <s-button
+                                        slot="secondary-actions"
                                         icon={responseLength === "concise" ? "check" : undefined}
-                                        variant={responseLength === "concise" ? "primary" : undefined}
                                         onClick={() => setResponseLength("concise")}
                                     >
                                         Concise
                                     </s-button>
                                     <s-button
+                                        slot="secondary-actions"
                                         icon={responseLength === "balanced" ? "check" : undefined}
-                                        variant={responseLength === "balanced" ? "primary" : undefined}
                                         onClick={() => setResponseLength("balanced")}
                                     >
                                         Balanced
                                     </s-button>
                                     <s-button
+                                        slot="secondary-actions"
                                         icon={responseLength === "detailed" ? "check" : undefined}
-                                        variant={responseLength === "detailed" ? "primary" : undefined}
                                         onClick={() => setResponseLength("detailed")}
                                     >
                                         Detailed
@@ -350,8 +361,8 @@ export default function Instructions() {
                             <s-clickable
                                 padding="base"
                                 borderRadius="base"
-                                border={behaviors.includes("proactive_selling") ? "base-dark" : "base"}
-                                background={behaviors.includes("proactive_selling") ? "subdued" : "surface"}
+                                border={behaviors.includes("proactive_selling") ? "large-100" : "base"}
+                                background={behaviors.includes("proactive_selling") ? "subdued" : "base"}
                                 onClick={() => handleBehaviorToggle("proactive_selling")}
                             >
                                 <s-stack direction="inline" justifyContent="space-between" alignItems="center">
@@ -365,8 +376,8 @@ export default function Instructions() {
                             <s-clickable
                                 padding="base"
                                 borderRadius="base"
-                                border={behaviors.includes("inventory_check") ? "base-dark" : "base"}
-                                background={behaviors.includes("inventory_check") ? "subdued" : "surface"}
+                                border={behaviors.includes("inventory_check") ? "large-100" : "base"}
+                                background={behaviors.includes("inventory_check") ? "subdued" : "base"}
                                 onClick={() => handleBehaviorToggle("inventory_check")}
                             >
                                 <s-stack direction="inline" justifyContent="space-between" alignItems="center">
@@ -380,8 +391,8 @@ export default function Instructions() {
                             <s-clickable
                                 padding="base"
                                 borderRadius="base"
-                                border={behaviors.includes("lead_capture") ? "base-dark" : "base"}
-                                background={behaviors.includes("lead_capture") ? "subdued" : "surface"}
+                                border={behaviors.includes("lead_capture") ? "large-100" : "base"}
+                                background={behaviors.includes("lead_capture") ? "subdued" : "base"}
                                 onClick={() => handleBehaviorToggle("lead_capture")}
                             >
                                 <s-stack direction="inline" justifyContent="space-between" alignItems="center">
@@ -395,10 +406,10 @@ export default function Instructions() {
                             </s-clickable>
 
                             <s-clickable
-                                background={behaviors.includes("smart_handoff") ? "subdued" : "surface"}
+                                background={behaviors.includes("smart_handoff") ? "subdued" : "base"}
                                 padding="base"
                                 borderRadius="base"
-                                border={behaviors.includes("smart_handoff") ? "base-dark" : "base"}
+                                border={behaviors.includes("smart_handoff") ? "large-100" : "base"}
                                 onClick={() => handleBehaviorToggle("smart_handoff")}
                             >
                                 <s-stack direction="inline" justifyContent="space-between" alignItems="center">
@@ -413,16 +424,18 @@ export default function Instructions() {
 
                         </s-grid>
                     </s-section>
+
+
                 </s-page>
             </s-grid-item>
             <s-grid-item>
-                <div style={{ width: '100%', flexShrink: 0 }}>
+                <div style={{ width: '440px', flexShrink: 0 }}>
                     <div style={{ position: 'sticky', top: '24px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
                             <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#334155', display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
                                 <MessageCircle size={16} /> Live Preview
                             </h3>
-                            <s-button variant="plain" icon="refresh" onClick={handleResetSimulation}>
+                            <s-button variant="tertiary" icon="refresh" onClick={handleResetSimulation}>
                                 Reset
                             </s-button>
                         </div>

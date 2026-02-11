@@ -85,8 +85,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         const chatSessions = await prisma.chatSession.findMany({
             where: { shop: session.shop },
             include: {
-                customer: true,
-                messages: {
+                Customer: true,
+                Message: {
                     orderBy: { createdAt: "asc" },
                     include: {
                         recommendedProducts: true // Include products recommended by AI
@@ -94,27 +94,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                 }
             },
             orderBy: { createdAt: "desc" }
-        });
+        }) as any[];
 
         // Group sessions by customer (including guests)
         const customersMap = new Map<string, Customer>();
 
         for (const sessionRow of chatSessions) {
-            const isGuest = !sessionRow.customer;
-            const customerId = sessionRow.customer?.id ?? `guest-${sessionRow.id}`;
+            const isGuest = !(sessionRow as any).Customer;
+            const customerId = (sessionRow as any).Customer?.id ?? `guest-${sessionRow.id}`;
 
             let customer = customersMap.get(customerId);
 
             if (!customer) {
                 customer = {
                     id: customerId,
-                    shopifyId: sessionRow.customer?.shopifyId ?? null,
-                    email: sessionRow.customer?.email ?? "guest",
-                    firstName: sessionRow.customer?.firstName ?? (isGuest ? "Guest" : null),
-                    lastName: sessionRow.customer?.lastName ?? null,
-                    phone: sessionRow.customer?.phone ?? null,
-                    source: sessionRow.customer?.source ?? (isGuest ? "WEBSITE" : "SHOPIFY"),
-                    createdAt: sessionRow.customer?.createdAt ?? sessionRow.createdAt,
+                    shopifyId: (sessionRow as any).Customer?.shopifyId ?? null,
+                    email: (sessionRow as any).Customer?.email ?? "guest",
+                    firstName: (sessionRow as any).Customer?.firstName ?? (isGuest ? "Guest" : null),
+                    lastName: (sessionRow as any).Customer?.lastName ?? null,
+                    phone: (sessionRow as any).Customer?.phone ?? null,
+                    source: (sessionRow as any).Customer?.source ?? (isGuest ? "WEBSITE" : "SHOPIFY"),
+                    createdAt: (sessionRow as any).Customer?.createdAt ?? sessionRow.createdAt,
                     chats: []
                 };
                 customersMap.set(customerId, customer);
@@ -125,7 +125,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                 customerId: sessionRow.customerId,
                 isGuest: sessionRow.isGuest,
                 createdAt: sessionRow.createdAt,
-                messages: sessionRow.messages.map(m => ({
+                messages: ((sessionRow as any).Message as any[] || []).map((m: any) => ({
                     id: m.id,
                     content: m.content,
                     role: m.role as "user" | "assistant" | "system",
@@ -133,7 +133,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                     // FIX: Convert nulls from Prisma to undefined for TypeScript compatibility
                     products:
                         m.role === "assistant" && m.recommendedProducts.length > 0
-                            ? m.recommendedProducts.map((p) => ({
+                            ? m.recommendedProducts.map((p: any) => ({
                                 id: p.productProdId ?? undefined, // Converts null to undefined
                                 title: p.title,
                                 price: p.price,
@@ -390,11 +390,11 @@ export function CustomerSidebar({
 function ChatInterface({
     customer,
     messages,
-    aiEnabled,
-    setAiEnabled,
-    replyText,
-    setReplyText,
-    handleAiSuggest,
+    // aiEnabled,
+    // setAiEnabled,
+    // replyText,
+    // setReplyText,
+    // handleAiSuggest,
 }: ChatInterfaceProps) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const lastMessageIdRef = useRef<string | null>(null);

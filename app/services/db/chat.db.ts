@@ -6,36 +6,40 @@ import { ChatProduct, HistoryFilter } from "app/types/chat.types";
  */
 export async function getOrCreateSession(shop: string, custMail: string) {
     if (!custMail || custMail === "guest") {
-        const guestSession = await prisma.chatSession.create({
+        const guestSession = (await prisma.chatSession.create({
             data: { shop, isGuest: true },
             include: { messages: true }
-        });
+        } as any)) as any;
 
         return { session: guestSession, customerId: null };
     }
 
     // 1. Ensure Customer Exists
-    const customer = await prisma.customer.upsert({
+    const customer = (await prisma.customer.upsert({
         where: { shop_email: { shop, email: custMail } },
         update: {},
-        create: { shop, email: custMail },
-    });
+        create: {
+            shop,
+            email: custMail,
+            updatedAt: new Date()
+        } as any,
+    })) as any;
 
     // 2. Find Active Session
-    const session = await prisma.chatSession.findFirst({
+    const session = (await prisma.chatSession.findFirst({
         where: { customerId: customer.id, shop },
         include: {
             messages: { take: 10, orderBy: { createdAt: "asc" } }
         }
-    });
+    } as any)) as any;
 
     if (session) return { session, customerId: customer.id };
 
     // 3. Create New
-    const newSession = await prisma.chatSession.create({
+    const newSession = (await prisma.chatSession.create({
         data: { shop, customerId: customer.id, isGuest: false },
         include: { messages: true }
-    });
+    } as any)) as any;
 
     return { session: newSession, customerId: customer.id };
 }
@@ -62,7 +66,7 @@ export async function saveChatTurn(
                 handle: p.handle,
                 image: p.image || "",
                 score: p.score || 0
-            }))
+            })) as any
         });
     }
 }
@@ -118,7 +122,7 @@ export async function fetchChatHistory(filter: HistoryFilter) {
 
     // 3. Execute Database Query
     // We fetch sessions AND their messages in one go
-    const sessions = await prisma.chatSession.findMany({
+    const sessions = (await prisma.chatSession.findMany({
         where: whereClause,
         include: {
             messages: {
@@ -132,15 +136,15 @@ export async function fetchChatHistory(filter: HistoryFilter) {
             },
         },
         orderBy: { createdAt: "desc" },
-    });
+    } as any)) as any[];
 
     // 4. Analytics Calculation (Only for 'analyze' mode)
     let statistics = null;
     if (mode === "analyze") {
         const totalSessions = sessions.length;
-        const totalMessages = sessions.reduce((sum, s) => sum + s.messages.length, 0);
+        const totalMessages = sessions.reduce((sum: number, s: any) => sum + s.messages.length, 0);
         const totalProducts = sessions.reduce(
-            (sum, s) => sum + s.messages.reduce((mSum, m) => mSum + m.recommendedProducts.length, 0),
+            (sum: number, s: any) => sum + s.messages.reduce((mSum: number, m: any) => mSum + m.recommendedProducts.length, 0),
             0
         );
 
@@ -153,15 +157,15 @@ export async function fetchChatHistory(filter: HistoryFilter) {
     }
 
     // 5. Format Data for Frontend
-    const formattedSessions = sessions.map(session => ({
+    const formattedSessions = sessions.map((session: any) => ({
         id: session.id,
         createdAt: session.createdAt,
-        messages: session.messages.map(msg => ({
+        messages: session.messages.map((msg: any) => ({
             id: msg.id,
             role: msg.role,
             content: msg.content,
             createdAt: msg.createdAt,
-            products: msg.recommendedProducts.map(p => ({
+            products: msg.recommendedProducts.map((p: any) => ({
                 id: p.productProdId,
                 title: p.title,
                 price: p.price,
@@ -178,9 +182,9 @@ export async function fetchChatHistory(filter: HistoryFilter) {
 
     if (mode === "paginated") {
         // Flatten all messages from all sessions into one timeline
-        const allMessages = sessions.flatMap(s => s.messages);
+        const allMessages = sessions.flatMap((s: any) => s.messages);
         // Sort Newest -> Oldest
-        allMessages.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        allMessages.sort((a: any, b: any) => b.createdAt.getTime() - a.createdAt.getTime());
 
         // Check if we have more
         if (allMessages.length >= limit) {
@@ -189,12 +193,12 @@ export async function fetchChatHistory(filter: HistoryFilter) {
         }
 
         // Format the flattened list
-        resultMessages = allMessages.map(msg => ({
+        resultMessages = allMessages.map((msg: any) => ({
             id: msg.id,
             role: msg.role,
             content: msg.content,
             createdAt: msg.createdAt,
-            products: msg.recommendedProducts.map(p => ({
+            products: msg.recommendedProducts.map((p: any) => ({
                 id: p.productProdId,
                 title: p.title,
                 price: p.price,

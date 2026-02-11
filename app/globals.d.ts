@@ -1,10 +1,10 @@
 export { };
 
 declare global {
-    var shopify: {
+    let shopify: {
         scopes: {
             request: (scopes: string[]) => Promise<{ result: 'granted-all' | 'declined-all' }>;
-            query: () => Promise<any>;
+            query: () => Promise<unknown>;
         };
         toast: {
             show: (message: string) => void;
@@ -108,38 +108,112 @@ declare global {
                 resourceName?: { singular: string; plural: string };
                 itemCount?: number;
                 selectedItemsCount?: number | "all";
-                onSelectionChange?: (selectionType: any, toggleType: any, selection: any) => void;
+                onSelectionChange?: (selectionType: unknown, toggleType: unknown, selection: unknown) => void;
                 hasMoreItems?: boolean;
                 promotedBulkActions?: { content: string; onAction: () => void }[];
                 bulkActions?: { content: string; onAction: () => void }[];
                 loading?: boolean;
             };
-            's-thead': any;
-            's-tbody': any;
-            's-tr': any;
-            's-th': any;
-            's-td': any;
-            's-tag': any;
-            's-badge': any;
-            's-switch': any;
-            's-input': any;
-            's-select': any;
-            's-modal': any;
-            's-table-header-row': any;
-            's-table-header': any;
-            's-table-body': any;
-            's-table-row': any;
-            's-table-cell': any;
-            's-checkbox': any;
-            's-clickable': any;
-            's-image': any;
-            's-link': any;
-            's-text-field': any;
-            's-tooltip': any;
-            's-popover': any;
-            's-divider': any;
-            's-choice-list': any;
-            's-choice': any;
+            's-thead': React.HTMLAttributes<HTMLElement>;
+            's-tbody': React.HTMLAttributes<HTMLElement>;
+            's-tr': React.HTMLAttributes<HTMLElement>;
+            's-th': React.HTMLAttributes<HTMLElement>;
+            's-td': React.HTMLAttributes<HTMLElement>;
+            's-tag': React.HTMLAttributes<HTMLElement>;
+            's-badge': React.HTMLAttributes<HTMLElement>;
+            's-switch': Omit<React.HTMLAttributes<HTMLElement>, 'onChange'> & {
+                label?: string;
+                details?: string;
+                checked?: boolean;
+                onChange?: (event: { target: HTMLInputElement }) => void;
+                disabled?: boolean;
+            };
+            's-number-field': Omit<React.HTMLAttributes<HTMLElement>, 'onInput' | 'onChange'> & {
+                label?: string;
+                value?: string | number;
+                min?: number;
+                max?: number;
+                step?: number;
+                onChange?: (event: { target: HTMLInputElement }) => void;
+                disabled?: boolean;
+            };
+            's-color-field': Omit<React.HTMLAttributes<HTMLElement>, 'onInput' | 'onChange'> & {
+                label?: string;
+                placeholder?: string;
+                value?: string;
+                onChange?: (event: { target: HTMLInputElement }) => void;
+                disabled?: boolean;
+            };
+            's-input': React.HTMLAttributes<HTMLElement>;
+            's-select': Omit<React.HTMLAttributes<HTMLElement>, 'onInput' | 'onChange'> & {
+                label?: string;
+                name?: string;
+                value?: string;
+                onInput?: (event: { target: HTMLSelectElement }) => void;
+                onChange?: (event: { target: HTMLSelectElement }) => void;
+                disabled?: boolean;
+                details?: string;
+            };
+            's-modal': React.HTMLAttributes<HTMLElement>;
+            's-table-header-row': React.HTMLAttributes<HTMLElement>;
+            's-table-header': React.HTMLAttributes<HTMLElement>;
+            's-table-body': React.HTMLAttributes<HTMLElement>;
+            's-table-row': React.HTMLAttributes<HTMLElement>;
+            's-table-cell': React.HTMLAttributes<HTMLElement>;
+            's-checkbox': React.HTMLAttributes<HTMLElement>;
+            's-clickable': React.HTMLAttributes<HTMLElement> & {
+                border?: string;
+                borderRadius?: string;
+                padding?: string;
+                background?: string;
+                inlineSize?: string;
+                onClick?: () => void;
+            };
+            's-image': React.HTMLAttributes<HTMLElement> & {
+                src?: string;
+                alt?: string;
+                width?: string | number;
+                height?: string | number;
+            };
+            's-link': React.HTMLAttributes<HTMLElement> & {
+                url?: string;
+                external?: boolean;
+            };
+            's-text-field': Omit<React.HTMLAttributes<HTMLElement>, 'onInput' | 'onChange'> & {
+                label?: string;
+                name?: string;
+                value?: string | number;
+                placeholder?: string;
+                maxLength?: number;
+                onInput?: (event: { target: HTMLInputElement }) => void;
+                onChange?: (event: { target: HTMLInputElement }) => void;
+                disabled?: boolean;
+                readOnly?: boolean;
+                error?: string | boolean;
+                helpText?: string;
+                autoFocus?: boolean;
+                type?: string;
+            };
+            's-text-area': Omit<React.HTMLAttributes<HTMLElement>, 'onInput' | 'onChange'> & {
+                label?: string;
+                name?: string;
+                value?: string;
+                placeholder?: string;
+                maxLength?: number;
+                onInput?: (event: { target: HTMLTextAreaElement }) => void;
+                onChange?: (event: { target: HTMLTextAreaElement }) => void;
+                disabled?: boolean;
+                readOnly?: boolean;
+                error?: string | boolean;
+                helpText?: string;
+                autoFocus?: boolean;
+                rows?: number;
+            };
+            's-tooltip': React.HTMLAttributes<HTMLElement>;
+            's-popover': React.HTMLAttributes<HTMLElement>;
+            's-divider': React.HTMLAttributes<HTMLElement>;
+            's-choice-list': React.HTMLAttributes<HTMLElement>;
+            's-choice': React.HTMLAttributes<HTMLElement>;
         }
     }
 }

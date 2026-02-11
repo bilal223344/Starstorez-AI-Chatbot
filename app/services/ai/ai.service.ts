@@ -1,31 +1,54 @@
-import { OpenAI } from "openai";
+import { VertexAI, FunctionDeclarationSchemaType, type Tool, type Content, type Part } from "@google-cloud/vertexai";
 import prisma from "app/db.server";
 import { AISettingsState } from "app/routes/app.personality";
+import { AIMessage } from "app/types/chat.types";
 
-const openai = new OpenAI();
+const LOCATION = "us-central1";
 
-export const TOOLS_DEFINITION: OpenAI.Chat.Completions.ChatCompletionTool[] = [
+const vertexAI = new VertexAI({
+    project: process.env.FIREBASE_PROJECT_ID || "ai-chat-bot-425d2",
+    location: LOCATION,
+    googleAuthOptions: {
+        credentials: {
+            client_email: process.env.FIREBASE_CLIENT_EMAIL,
+            private_key: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+        }
+    }
+});
+
+const generativeModel = vertexAI.getGenerativeModel({
+    model: "gemini-2.0-flash-001",
+});
+
+export const TOOLS_DEFINITION: Tool[] = [
     {
-        type: "function",
-        function: {
-            name: "recommend_products",
-            description: "Search for products based on user intent.",
-            parameters: {
-                type: "object",
-                properties: {
-                    search_query: { type: "string" },
-                    max_price: { type: "number" },
-                    sort: { type: "string", enum: ["price_asc", "price_desc", "relevance"] },
-                    boost_attribute: { type: "string" }
+        functionDeclarations: [
+            {
+                name: "recommend_products",
+                description: "Search for products based on user intent.",
+                parameters: {
+                    type: FunctionDeclarationSchemaType.OBJECT,
+                    properties: {
+                        search_query: { type: FunctionDeclarationSchemaType.STRING, description: "Main keywords" },
+                        max_price: { type: FunctionDeclarationSchemaType.NUMBER },
+                        sort: {
+                            type: FunctionDeclarationSchemaType.STRING,
+                            enum: ["price_asc", "price_desc", "relevance"],
+                            description: "Sort order"
+                        },
+                        boost_attribute: { type: FunctionDeclarationSchemaType.STRING }
+                    },
+                    required: ["search_query"],
                 },
-                required: ["search_query"],
             },
-        },
+        ],
     },
 ];
 
+
+
 export async function generateAIResponse(
-    messages: any[],
+    messages: AIMessage[],
     shop: string
 ) {
     // 1. Fetch Dynamic Settings (System Prompt)
@@ -34,23 +57,121 @@ export async function generateAIResponse(
 
     const systemMessage = buildSystemPrompt(shop, settingsData);
 
-    // 2. Call OpenAI
-    const response = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [{ role: "system", content: systemMessage }, ...messages],
-        tools: TOOLS_DEFINITION,
-        tool_choice: "auto",
-        temperature: 0.4,
+    // 2. Call Gemini
+    const model = vertexAI.getGenerativeModel({
+        model: "gemini-2.0-flash-001",
+        systemInstruction: systemMessage,
     });
 
-    return response.choices[0].message;
+    // Convert messages to Gemini history format
+    const history: Content[] = messages.slice(0, -1).map(m => {
+        if (m.role === "assistant") {
+            const parts: Part[] = [];
+            if (m.content) parts.push({ text: m.content });
+            if (m.tool_calls) {
+                m.tool_calls.forEach((tc) => {
+                    parts.push({
+                        functionCall: {
+                            name: tc.function.name,
+                            args: JSON.parse(tc.function.arguments)
+                        }
+                    });
+                });
+            }
+            return { role: "model", parts };
+        } else if (m.role === "tool") {
+            return {
+                role: "user",
+                parts: [{
+                    functionResponse: {
+                        name: "recommend_products",
+                        response: { content: m.content || "" }
+                    }
+                }]
+            };
+        } else {
+            return { role: "user", parts: [{ text: m.content || "" }] };
+        }
+    });
+
+    const lastMessage = messages[messages.length - 1];
+
+    // Handle if last message is a tool response
+    let lastContent: string | (string | Part)[];
+    if (lastMessage.role === "tool") {
+        lastContent = [{
+            functionResponse: {
+                name: "recommend_products",
+                response: { content: lastMessage.content || "" }
+            }
+        }];
+    } else {
+        lastContent = lastMessage.content || "";
+    }
+
+    const chat = model.startChat({
+        history,
+        tools: TOOLS_DEFINITION,
+    });
+
+    const result = await chat.sendMessage(lastContent);
+    const response = result.response;
+    const messagePart = response.candidates?.[0]?.content?.parts?.[0];
+
+    // Map back for compatibility
+    return {
+        role: "assistant",
+        content: messagePart?.text || null,
+        tool_calls: messagePart?.functionCall ? [{
+            id: "call_" + Date.now(),
+            type: "function",
+            function: {
+                name: messagePart.functionCall.name,
+                arguments: JSON.stringify(messagePart.functionCall.args)
+            }
+        }] : null
+    };
+}
+
+export async function generateThemeSettings(prompt: string) {
+    const systemPrompt = `
+You are a design expert for e-commerce chat widgets.
+Your task is to generate branding and window settings for a Shopify chatbot based on a user's description.
+
+Return ONLY a JSON object that matches the following structure (Partial<WidgetSettings>):
+{
+  "branding": {
+    "primaryColor": "string (hex)",
+    "secondaryColor": "string (hex)",
+    "backgroundColor": "string (hex)",
+    "fontFamily": "string (Inter, UI-Sans, etc)",
+    "fontSize": number (12-16)
+  },
+  "window": {
+    "title": "string",
+    "subtitle": "string",
+    "cornerRadius": number (0-24)
+  }
+}
+
+The user's prompt is: "${prompt}"
+`;
+
+    const result = await generativeModel.generateContent({
+        contents: [{ role: "user", parts: [{ text: systemPrompt + "\n\nUser prompt: " + prompt }] }],
+        generationConfig: {
+            responseMimeType: "application/json",
+        },
+    });
+
+    const responseText = result.response.candidates?.[0]?.content?.parts?.[0]?.text;
+    return JSON.parse(responseText || "{}");
 }
 
 function buildSystemPrompt(shop: string, aiSettings: AISettingsState): string {
     const storeDetails = aiSettings.storeDetails || {};
     const policies = aiSettings.policies || {};
 
-    // 2. Language Settings
     const langSettings = aiSettings.languageSettings || {};
     const primaryLanguage = langSettings.primaryLanguage || "English";
     const autoDetect = langSettings.autoDetect !== false;
@@ -60,12 +181,10 @@ function buildSystemPrompt(shop: string, aiSettings: AISettingsState): string {
    Never switch languages, even if the user does. Never explain or mention language rules.`
         : `STRICT RULE: You must ONLY speak in ${primaryLanguage}.`;
 
-    // 3. Custom Instructions (From Merchant Settings)
     const customInstructions = aiSettings.aiInstructions
         ? `[CUSTOM INSTRUCTIONS FROM OWNER]\n${aiSettings.aiInstructions}`
         : "";
 
-    // 4. Policies
     const policyText = `
     - Shipping: ${policies.shipping || ""}
     - Returns: ${policies.refund || ""}

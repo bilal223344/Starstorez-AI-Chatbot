@@ -1,7 +1,29 @@
 import { useState } from "react";
+import type { CallbackEvent } from "@shopify/polaris-types";
+import { WidgetSettings } from "../../types";
 
-export default function Content() {
+interface ContentProps {
+    settings: WidgetSettings['content'];
+    onChange: <K extends keyof WidgetSettings['content']>(key: K, value: WidgetSettings['content'][K]) => void;
+}
+
+export default function Content({ settings, onChange }: ContentProps) {
     const [isOpenDisplayRule, setIsOpenDisplayRule] = useState(true);
+
+    const handleActionChange = (index: number, value: string) => {
+        const newActions = [...settings.quickActions];
+        newActions[index] = value;
+        onChange('quickActions', newActions);
+    };
+
+    const handleAddAction = () => {
+        onChange('quickActions', [...settings.quickActions, "New Action"]);
+    };
+
+    const handleDeleteAction = (index: number) => {
+        const newActions = settings.quickActions.filter((_, i) => i !== index);
+        onChange('quickActions', newActions);
+    };
 
     return (
         <s-stack gap="base">
@@ -19,9 +41,10 @@ export default function Content() {
                         <s-divider />
                         <s-stack gap="small" padding="small-200 base base">
                             <s-text-field
-                                value="👋 Hi there! I'm StartStorez. How can I help you find the perfect product today?"
+                                value={settings.welcomeMessage}
                                 minLength={2}
                                 maxLength={120}
+                                onInput={(e: CallbackEvent<'s-text-field'>) => onChange('welcomeMessage', (e.target as HTMLInputElement).value)}
                             />
                         </s-stack>
                     </>
@@ -41,20 +64,17 @@ export default function Content() {
                     <>
                         <s-divider />
                         <s-stack gap="small" padding="small-200 base base">
-                            <s-grid gridTemplateColumns="1fr auto" gap="small">
-                                <s-text-field value="Track my order" />
-                                <s-button icon="delete" />
-                            </s-grid>
-                            <s-grid gridTemplateColumns="1fr auto" gap="small">
-                                <s-text-field value="Shipping policy" />
-                                <s-button icon="delete" />
-                            </s-grid>
-                            <s-grid gridTemplateColumns="1fr auto" gap="small">
-                                <s-text-field value="Best sellers" />
-                                <s-button icon="delete" />
-                            </s-grid>
+                            {settings.quickActions.map((action, index) => (
+                                <s-grid key={index} gridTemplateColumns="1fr auto" gap="small">
+                                    <s-text-field
+                                        value={action}
+                                        onInput={(e: CallbackEvent<'s-text-field'>) => handleActionChange(index, (e.target as HTMLInputElement).value)}
+                                    />
+                                    <s-button icon="delete" onClick={() => handleDeleteAction(index)} />
+                                </s-grid>
+                            ))}
                             <s-grid gridTemplateColumns="1fr">
-                                <s-button icon="plus">Add Action</s-button>
+                                <s-button icon="plus" onClick={handleAddAction}>Add Action</s-button>
                             </s-grid>
                         </s-stack>
                     </>

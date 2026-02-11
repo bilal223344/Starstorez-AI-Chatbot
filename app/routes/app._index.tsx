@@ -44,16 +44,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   ] = await Promise.all([
     // A. Total Messages
     prisma.message.count({
-      where: { session: { shop } }
+      where: { ChatSession: { shop } }
     }),
 
     // B. Human Handoffs (Sessions needing attention)
     prisma.chatSession.count({
       where: {
         shop,
-        messages: { some: {} },
+        Message: { some: {} },
         // Logic: Session exists, has messages, but NO assistant reply implies human needed OR manual takeover
-        NOT: { messages: { some: { role: "assistant" } } }
+        NOT: { Message: { some: { role: "assistant" } } }
       }
     }),
 
@@ -63,13 +63,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       take: 5,
       orderBy: { createdAt: "desc" },
       include: {
-        customer: true,
-        messages: {
+        Customer: true,
+        Message: {
           take: 1,
           orderBy: { createdAt: "desc" }
         }
       }
-    }),
+    }) as any,
 
     // D. AI Training Status
     prisma.product.groupBy({
@@ -202,24 +202,24 @@ export default function Dashboard() {
               {recentChats.length === 0 ? (
                 <s-table-row><s-table-cell><s-text color="subdued">No recent chats found.</s-text></s-table-cell></s-table-row>
               ) : (
-                recentChats.map((chat) => (
+                recentChats.map((chat: any) => (
                   <s-table-row key={chat.id}>
                     <s-table-cell>
                       <s-stack direction="inline" gap="small" alignItems="center">
-                        <s-avatar size="small" initials={chat.customer?.firstName?.[0] || "G"} />
-                        <s-link href={`/app/chats/management?customerId=${chat.customer?.id || ''}`}>
-                          {chat.customer?.email || "Guest User"}
+                        <s-avatar size="small" initials={(chat as any).Customer?.firstName?.[0] || "G"} />
+                        <s-link href={`/app/chats/management?customerId=${(chat as any).Customer?.id || ''}`}>
+                          {(chat as any).Customer?.email || "Guest User"}
                         </s-link>
                       </s-stack>
                     </s-table-cell>
                     <s-table-cell>
-                      <s-badge tone={chat.messages[0]?.role === "assistant" ? "success" : "caution"}>
-                        {chat.messages[0]?.role === "assistant" ? "AI Managed" : "Awaiting Reply"}
+                      <s-badge tone={(chat as any).Message[0]?.role === "assistant" ? "success" : "caution"}>
+                        {(chat as any).Message[0]?.role === "assistant" ? "AI Managed" : "Awaiting Reply"}
                       </s-badge>
                     </s-table-cell>
                     <s-table-cell>
                       <div style={{ maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        <s-text tone="neutral">{chat.messages[0]?.content || "No messages"}</s-text>
+                        <s-text tone="neutral">{(chat as any).Message[0]?.content || "No messages"}</s-text>
                       </div>
                     </s-table-cell>
                     <s-table-cell>

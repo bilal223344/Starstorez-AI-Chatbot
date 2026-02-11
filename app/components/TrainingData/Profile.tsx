@@ -12,7 +12,6 @@ interface BrandProfile {
 }
 
 export default function Profile({ brandProfile: initialBrandProfile }: { brandProfile: BrandProfile }) {
-    // const loader = useFetcher... -> Removed
     const fetcher = useFetcher<{ success: boolean; message: string }>();
 
     const [formData, setFormData] = useState({

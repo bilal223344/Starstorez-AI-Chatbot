@@ -99,7 +99,7 @@ model Message {
 }
 
 model MessageProduct {
-  id            String   @id
+  id            String   @id @default(uuid())
   messageId     String
   productProdId String?
   title         String
@@ -115,7 +115,7 @@ model MessageProduct {
 }
 
 model MerchantCredits {
-  id               String       @id
+  id               String       @id @default(uuid())
   shop             String       @unique
   planId           String
   totalCredits     Int          @default(0)
@@ -192,7 +192,7 @@ model FAQ {
 }
 
 model AISettings {
-  id        String   @id
+  id        String   @id @default(uuid())
   shop      String   @unique
   settings  Json
   createdAt DateTime @default(now())
@@ -202,7 +202,7 @@ model AISettings {
 }
 
 model ChatbotCustomization {
-  id        String   @id
+  id        String   @id @default(uuid())
   shop      String   @unique
   settings  Json
   createdAt DateTime @default(now())
@@ -212,7 +212,7 @@ model ChatbotCustomization {
 }
 
 model ChatConfiguration {
-  id                     String   @id
+  id                     String   @id @default(uuid())
   shop                   String   @unique
   aiEnabled              Boolean  @default(true)
   autoHandoffEnabled     Boolean  @default(true)
@@ -223,13 +223,13 @@ model ChatConfiguration {
   fallbackMessage        String?
   manualChatNotification String?
   createdAt              DateTime @default(now())
-  updatedAt              DateTime
+  updatedAt              DateTime @updatedAt
 
   @@index([shop])
 }
 
 model Customer {
-  id          String        @id
+  id          String        @id @default(uuid())
   shopifyId   String?       @unique
   email       String
   firstName   String?
@@ -237,7 +237,7 @@ model Customer {
   phone       String?
   source      String        @default("SHOPIFY")
   createdAt   DateTime      @default(now())
-  updatedAt   DateTime
+  updatedAt   DateTime      @updatedAt
   shop        String
   ChatSession ChatSession[]
   Order       Order[]
@@ -247,7 +247,7 @@ model Customer {
 }
 
 model MerchantPlan {
-  id                 String            @id
+  id                 String            @id @default(uuid())
   name               String            @unique
   monthlyCredits     Int
   maxConcurrentChats Int
@@ -259,7 +259,7 @@ model MerchantPlan {
 }
 
 model Order {
-  id          String      @id
+  id          String      @id @default(uuid())
   shopifyId   String      @unique
   orderNumber String
   status      String
@@ -271,7 +271,7 @@ model Order {
 }
 
 model OrderItem {
-  id          String  @id
+  id          String  @id @default(uuid())
   productName String
   quantity    Int
   sku         String?
@@ -281,7 +281,7 @@ model OrderItem {
 }
 
 model UsageLog {
-  id                String          @id
+  id                String          @id @default(uuid())
   shop              String
   merchantCreditsId String
   requestType       String

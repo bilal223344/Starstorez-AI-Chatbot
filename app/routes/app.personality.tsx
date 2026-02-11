@@ -114,7 +114,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       create: {
         shop: session.shop,
         settings: settingsJson,
-      },
+      } as any,
       update: {
         settings: settingsJson,
         updatedAt: new Date(),

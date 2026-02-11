@@ -4,11 +4,11 @@ const prisma = new PrismaClient();
 
 async function initializeCreditsSystem() {
     console.log('🚀 Initializing Credits System...');
-    
+
     try {
         // 1. Create default plans
         console.log('📋 Creating subscription plans...');
-        
+
         const plans = [
             {
                 name: "Free",
@@ -36,7 +36,7 @@ async function initializeCreditsSystem() {
                 }
             },
             {
-                name: "Pro", 
+                name: "Pro",
                 monthlyCredits: 20000,
                 maxConcurrentChats: 50,
                 price: 99,
@@ -72,7 +72,7 @@ async function initializeCreditsSystem() {
             const plan = await prisma.merchantPlan.upsert({
                 where: { name: planData.name },
                 update: planData,
-                create: planData
+                create: planData as any
             });
             createdPlans.push(plan);
             console.log(`✅ ${plan.name} plan created (${plan.monthlyCredits} credits)`);
@@ -80,7 +80,7 @@ async function initializeCreditsSystem() {
 
         // 2. Set up existing merchants with free plan
         console.log('👥 Setting up existing merchants...');
-        
+
         const existingSessions = await prisma.session.findMany({
             select: { shop: true },
             distinct: ['shop']
@@ -109,7 +109,7 @@ async function initializeCreditsSystem() {
                         periodEnd,
                         aiEnabled: true,
                         autoRecharge: true
-                    }
+                    } as any
                 });
 
                 merchantsSetup++;
@@ -119,7 +119,7 @@ async function initializeCreditsSystem() {
 
         // 3. Create default chat configurations
         console.log('⚙️ Creating chat configurations...');
-        
+
         let configsCreated = 0;
         for (const session of existingSessions) {
             const existingConfig = await prisma.chatConfiguration.findUnique({
@@ -137,10 +137,11 @@ async function initializeCreditsSystem() {
                         maxConcurrentRequests: 5,
                         rateLimitPerMinute: 60,
                         fallbackMessage: "I'm currently unavailable. A team member will assist you shortly!",
-                        manualChatNotification: "A customer needs manual assistance in the chat."
-                    }
+                        manualChatNotification: "A customer needs manual assistance in the chat.",
+                        updatedAt: new Date()
+                    } as any
                 });
-                
+
                 configsCreated++;
             }
         }
@@ -151,7 +152,7 @@ async function initializeCreditsSystem() {
         console.log(`   • ${merchantsSetup} merchants assigned to Free plan`);
         console.log(`   • ${configsCreated} chat configurations created`);
         console.log('\n✨ Your merchants can now use the optimized chat API with credit tracking!');
-        
+
     } catch (error) {
         console.error('❌ Error initializing credits system:', error);
         throw error;

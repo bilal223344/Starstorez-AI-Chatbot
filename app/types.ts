@@ -102,6 +102,20 @@ export interface ShopifyCustomersResponse {
     };
 }
 
+export interface ShopifyPageNode {
+    id: string;
+    handle: string;
+    isPublished: boolean;
+    title: string;
+}
+
+export interface ShopifyPagesResponse {
+    pages: {
+        edges: ShopifyEdge<ShopifyPageNode>[];
+        pageInfo: PageInfo;
+    };
+}
+
 // ============================================================================
 // 4. PINECONE TYPES
 // ============================================================================
@@ -164,11 +178,74 @@ export interface SavedOrder {
     status: string;
     totalPrice: number;
     createdAt: Date;
-    customer: {
+    Customer: {
         id: string; // The Internal Prisma ID
     };
-    items: {
+    OrderItem: {
         quantity: number;
         productName: string;
     }[];
+}
+
+// ============================================================================
+// 6. WIDGET SETTINGS
+// ============================================================================
+
+// Widget Settings
+export interface WidgetSettings {
+    branding: {
+        primaryColor: string;
+        secondaryColor: string;
+        backgroundColor: string;
+        fontFamily: string;
+        fontSize: number;
+    };
+    window: {
+        title: string;
+        subtitle: string;
+        avatarId: number;
+        width: number;
+        height: number;
+        cornerRadius: number;
+        messageVerticalPadding: number;
+        messageBorderRadius: {
+            tl: number;
+            tr: number;
+            br: number;
+            bl: number;
+        };
+    };
+    launcher: {
+        iconId: string;
+        iconSize: number;
+        position: 'left' | 'right';
+        marginH: number;
+        marginV: number;
+        animation: {
+            type: 'static' | 'pulse' | 'bounce' | 'shake' | 'rotate' | 'glow';
+            duration: number;
+        };
+        windowTransition: {
+            type: 'fade' | 'slide' | 'scale' | 'rotate' | 'instant';
+            duration: number;
+        };
+    };
+    visibility: {
+        showOnMobile: boolean;
+        showOnDesktop: boolean;
+        rule: 'all' | 'specific' | 'hide';
+        paths: string[];
+    };
+    content: {
+        welcomeMessage: string;
+        quickActions: string[];
+    };
+    addOns: {
+        productSlider: {
+            enabled: boolean;
+            cardWidth: number;
+            cardHeight: number;
+            cardBackground: string;
+        };
+    };
 }

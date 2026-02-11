@@ -1,5 +1,7 @@
 import { Sparkles } from "lucide-react";
 import { useState } from "react";
+import type { CallbackEvent } from "@shopify/polaris-types";
+import { WidgetSettings } from "../../types";
 
 const hexToRgba = (hex: string, opacity: number) => {
     const r = parseInt(hex.slice(1, 3), 16);
@@ -8,9 +10,19 @@ const hexToRgba = (hex: string, opacity: number) => {
     return `rgba(${r}, ${g}, ${b}, ${opacity})`;
 };
 
-export default function Branding() {
+interface BrandingProps {
+    settings: WidgetSettings['branding'];
+    onChange: <K extends keyof WidgetSettings['branding']>(key: K, value: WidgetSettings['branding'][K]) => void;
+    isGenerating?: boolean;
+    onGenerate?: (prompt: string) => void;
+}
+
+export default function Branding({ settings, onChange, isGenerating, onGenerate }: BrandingProps) {
     const [isOpenGblColor, setIsOpenGblColor] = useState(false);
     const [isOpen, setIsOpen] = useState(false);
+
+    // AI Theme Generator state
+    const [themeDescription, setThemeDescription] = useState("");
 
     const presets = [
         { name: "Modern Minimal", description: "Clean and simple design", color: "#2563EB" },
@@ -30,6 +42,11 @@ export default function Branding() {
     const fontColors = ["#111F35", "#ECECEC", "#362F4F", "#FCF8F8", "#222222", "#EDFFF0", "#000000", "#FFF8DE", "#2D3C59", "#EFE9E3", "#1A2A4F"];
     const bgColors = ["#FCF8F8", "#F0F0DB", "#ECECEC", "#EFE1B5", "#F0FFDF", "#F3F4F4", "#2B2A2A", "#3A2525", "#213448", "#1B211A"]
 
+    const applyPreset = (color: string) => {
+        onChange('primaryColor', color);
+        // We could also set secondary/bg based on preset if we had that data
+    };
+
     return (
         <s-stack gap="base">
             {/* AI Theme Generator */}
@@ -46,8 +63,20 @@ export default function Branding() {
                             </span>
                         </s-paragraph>
                         <s-grid gridTemplateColumns="1fr auto" gap="small">
-                            <s-text-field />
-                            <s-button type="button" icon="wand" variant="secondary" />
+                            <s-text-field
+                                value={themeDescription}
+                                onInput={(e: CallbackEvent<'s-text-field'>) => setThemeDescription((e.target as HTMLInputElement).value)}
+                                placeholder="e.g. Luxury gold and black theme"
+                                disabled={isGenerating}
+                            />
+                            <s-button
+                                type="button"
+                                icon="wand"
+                                variant="secondary"
+                                loading={isGenerating}
+                                onClick={() => onGenerate?.(themeDescription)}
+                                disabled={!themeDescription.trim() || isGenerating}
+                            />
                         </s-grid>
                     </s-stack>
                 </div>
@@ -56,7 +85,7 @@ export default function Branding() {
             {/* Preset */}
             <s-grid gridTemplateColumns="1fr 1fr 1fr 1fr" gap="small">
                 {presets.map((preset) => (
-                    <s-clickable key={preset.name} border="base" borderRadius="base" overflow="hidden">
+                    <s-clickable key={preset.name} border="base" borderRadius="base" overflow="hidden" onClick={() => applyPreset(preset.color)}>
                         <div style={{ background: hexToRgba(preset.color, 0.6) }}>
                             <s-stack gap="small-200" padding="small">
                                 <s-text>{preset.name}</s-text>
@@ -81,28 +110,55 @@ export default function Branding() {
                         <s-divider />
                         <s-stack gap="small" padding="none small small">
                             <s-stack gap="small-100" background="base" border="base" borderRadius="base" padding="small">
-                                <s-color-field label="Primary Brand" placeholder="Select a color" value="#FF0000" />
+                                <s-color-field
+                                    label="Primary Brand"
+                                    placeholder="Select a color"
+                                    value={settings.primaryColor}
+                                    onChange={(e: CallbackEvent<'s-color-field'>) => onChange('primaryColor', (e.target as HTMLInputElement).value)}
+                                />
                                 <div style={{ display: "flex", flexWrap: "wrap" }}>
                                     {aestheticColors.map((color) => (
-                                        <button key={color} style={{ backgroundColor: color, width: "32px", height: "32px", border: "none", borderRadius: "4px", marginRight: "8px", cursor: "pointer" }} />
+                                        <button
+                                            key={color}
+                                            style={{ backgroundColor: color, width: "32px", height: "32px", border: "none", borderRadius: "4px", marginRight: "8px", cursor: "pointer" }}
+                                            onClick={() => onChange('primaryColor', color)}
+                                        />
                                     ))}
                                 </div>
                             </s-stack>
 
                             <s-stack gap="small-100" background="base" border="base" borderRadius="base" padding="small">
-                                <s-color-field label="Secondary Accent" placeholder="Select a color" value="#FF0000" />
+                                <s-color-field
+                                    label="Secondary Accent"
+                                    placeholder="Select a color"
+                                    value={settings.secondaryColor}
+                                    onChange={(e: CallbackEvent<'s-color-field'>) => onChange('secondaryColor', (e.target as HTMLInputElement).value)}
+                                />
                                 <div style={{ display: "flex", flexWrap: "wrap" }}>
                                     {bgColors.map((color) => (
-                                        <button key={color} style={{ backgroundColor: color, width: "32px", height: "32px", border: "none", borderRadius: "4px", marginRight: "8px", cursor: "pointer" }} />
+                                        <button
+                                            key={color}
+                                            style={{ backgroundColor: color, width: "32px", height: "32px", border: "none", borderRadius: "4px", marginRight: "8px", cursor: "pointer" }}
+                                            onClick={() => onChange('secondaryColor', color)}
+                                        />
                                     ))}
                                 </div>
                             </s-stack>
 
                             <s-stack gap="small-100" background="base" border="base" borderRadius="base" padding="small">
-                                <s-color-field label="Background" placeholder="Select a color" value="#FF0000" />
+                                <s-color-field
+                                    label="Background"
+                                    placeholder="Select a color"
+                                    value={settings.backgroundColor}
+                                    onChange={(e: CallbackEvent<'s-color-field'>) => onChange('backgroundColor', (e.target as HTMLInputElement).value)}
+                                />
                                 <div style={{ display: "flex", flexWrap: "wrap" }}>
                                     {fontColors.map((color) => (
-                                        <button key={color} style={{ backgroundColor: color, width: "32px", height: "32px", border: "none", borderRadius: "4px", marginRight: "8px", cursor: "pointer" }} />
+                                        <button
+                                            key={color}
+                                            style={{ backgroundColor: color, width: "32px", height: "32px", border: "none", borderRadius: "4px", marginRight: "8px", cursor: "pointer" }}
+                                            onClick={() => onChange('backgroundColor', color)}
+                                        />
                                     ))}
                                 </div>
                             </s-stack>
@@ -125,7 +181,11 @@ export default function Branding() {
                     <>
                         <s-divider />
                         <s-grid gridTemplateColumns="1fr auto" gap="small" padding="none small small">
-                            <s-select label="Font family">
+                            <s-select
+                                label="Font family"
+                                value={settings.fontFamily}
+                                onChange={(e: CallbackEvent<'s-select'>) => onChange('fontFamily', (e.target as HTMLSelectElement).value)}
+                            >
                                 <s-option value="Inter">Inter</s-option>
                                 <s-option value="Poppins">Poppins</s-option>
                                 <s-option value="Roboto">Roboto</s-option>
@@ -142,7 +202,15 @@ export default function Branding() {
                                 <s-option value="PT Sans">PT Sans</s-option>
                                 <s-option value="Noto Sans">Noto Sans</s-option>
                             </s-select>
-                            <s-number-field label="Font size (px)" min={10} max={32} step={1} defaultValue="16" suffix="px" />
+                            <s-number-field
+                                label="Font size (px)"
+                                min={10}
+                                max={32}
+                                step={1}
+                                value={settings.fontSize.toString()}
+                                suffix="px"
+                                onChange={(e: CallbackEvent<'s-number-field'>) => onChange('fontSize', parseFloat((e.target as HTMLInputElement).value))}
+                            />
                         </s-grid>
                     </>
                 )}

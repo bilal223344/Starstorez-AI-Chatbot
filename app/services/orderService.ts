@@ -157,7 +157,7 @@ export const formatShopifyOrder = (node: ShopifyOrderNode, shop: string): Format
         // We pass the raw customer to handle the relationship in the DB function
         _customerPayload: node.customer,
         shop: shop // Pass shop down
-    };
+    } as any;
 };
 
 // --- DB Actions ---
@@ -165,12 +165,12 @@ export const saveOrderToDB = async (formattedData: FormattedOrderData & { shop: 
     const { _customerPayload, items, shop, ...orderData } = formattedData;
 
     try {
-        return await prisma.order.upsert({
+        return (await prisma.order.upsert({
             where: { shopifyId: orderData.shopifyId },
             create: {
                 ...orderData,
-                items: items,
-                customer: {
+                OrderItem: items,
+                Customer: {
                     connectOrCreate: {
                         where: { shopifyId: _customerPayload.id },
                         create: {
@@ -178,23 +178,24 @@ export const saveOrderToDB = async (formattedData: FormattedOrderData & { shop: 
                             email: _customerPayload.email,
                             lastName: _customerPayload.lastName,
                             source: "SHOPIFY",
-                            shop: shop
-                        }
+                            shop: shop,
+                            updatedAt: new Date()
+                        } as any
                     }
                 }
-            },
+            } as any,
             update: {
                 ...orderData,
-                items: {
+                OrderItem: {
                     deleteMany: {},
                     create: items.create
                 }
-            },
+            } as any,
             include: {
-                customer: true,
-                items: true
-            }
-        });
+                Customer: true,
+                OrderItem: true
+            } as any
+        })) as any;
     } catch (error) {
         console.error(`[DB Error] Order Sync Failed:`, error);
         throw error;

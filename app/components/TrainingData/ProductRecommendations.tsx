@@ -34,16 +34,12 @@ const SYSTEM_TRIGGERS: Record<string, string[]> = {
 };
 
 export default function ProductRecommendations({ campaigns: initialCampaigns, products: initialProducts }: { campaigns: Campaign[], products: Product[] }) {
-    // const loader = useFetcher... -> Removed
     const fetcher = useFetcher();
 
     const [campaigns, setCampaigns] = useState<Campaign[]>(initialCampaigns);
     const [allProducts, setAllProducts] = useState<Product[]>(initialProducts);
     const [currentCampaign, setCurrentCampaign] = useState<Partial<Campaign>>({});
     const [isEditing, setIsEditing] = useState(false);
-
-    // For product selection modal
-    const [isProductModalOpen, setIsProductModalOpen] = useState(false);
 
     // We store selected PROD_IDs (strings), not internal IDs
     const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
@@ -123,11 +119,10 @@ export default function ProductRecommendations({ campaigns: initialCampaigns, pr
     };
 
     const handleAddProducts = () => {
-        // Pre-select existing products
         const existingIds = new Set(currentCampaign._products?.map(p => p.prodId) || []);
         setSelectedProductIds(existingIds);
         setProductSearchQuery("");
-        setIsProductModalOpen(true);
+
     };
 
     const confirmAddProducts = () => {
@@ -136,7 +131,7 @@ export default function ProductRecommendations({ campaigns: initialCampaigns, pr
             ...prev,
             _products: selected
         }));
-        setIsProductModalOpen(false);
+
     };
 
     const handleRemoveProduct = (prodId: string) => {
@@ -217,8 +212,7 @@ export default function ProductRecommendations({ campaigns: initialCampaigns, pr
                                     {SYSTEM_CAMPAIGNS.includes(currentCampaign.name || "") ? (
                                         <s-stack gap="base">
                                             <s-box padding="small" border="base base dashed" borderRadius="base" background="subdued">
-                                                {/* @ts-ignore */}
-                                                <s-stack direction="inline" gap="small" wrap="wrap">
+                                                <s-stack direction="inline" gap="small">
                                                     {(SYSTEM_TRIGGERS[currentCampaign.name!] || currentCampaign.triggerKeywords)?.map((kw, i) => (
                                                         <s-badge key={i}>{kw}</s-badge>
                                                     ))}
@@ -251,7 +245,7 @@ export default function ProductRecommendations({ campaigns: initialCampaigns, pr
                             <div style={{ background: "white" }}>
                                 <s-stack direction="inline" padding="base" justifyContent="space-between" alignItems="center" gap="base">
                                     <s-heading>Selected Products ({currentCampaign._products?.length || 0})</s-heading>
-                                    <s-button icon="plus" onClick={handleAddProducts}>Add Products</s-button>
+                                    <s-button icon="plus" onClick={handleAddProducts} commandFor="product-selection-modal" command="--show">Add Products</s-button>
                                 </s-stack>
                             </div>
                             <s-stack padding="base" gap="base">
@@ -271,8 +265,7 @@ export default function ProductRecommendations({ campaigns: initialCampaigns, pr
 
 
                 <s-modal
-                    {...{ open: isProductModalOpen } as any}
-                    onClose={() => setIsProductModalOpen(false)}
+                    id="product-selection-modal"
                     heading="Select Products"
                 >
                     <s-stack gap="base" padding="base">
@@ -304,8 +297,8 @@ export default function ProductRecommendations({ campaigns: initialCampaigns, pr
                             </s-grid>
                         </div>
                         <s-stack direction="inline" justifyContent="end" gap="base">
-                            <s-button onClick={() => setIsProductModalOpen(false)}>Cancel</s-button>
-                            <s-button variant="primary" onClick={confirmAddProducts}>Done</s-button>
+                            <s-button commandFor="product-selection-modal" command="--hide">Cancel</s-button>
+                            <s-button variant="primary" onClick={confirmAddProducts} commandFor="product-selection-modal" command="--hide">Done</s-button>
                         </s-stack>
                     </s-stack>
                 </s-modal>

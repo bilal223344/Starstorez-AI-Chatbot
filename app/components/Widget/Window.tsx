@@ -1,5 +1,7 @@
 import { Bot, User } from "lucide-react";
 import { useState } from "react";
+import type { CallbackEvent } from "@shopify/polaris-types";
+import { WidgetSettings } from "../../types";
 
 const AVATARS = [
     { id: 1, gradient: 'from-blue-400 to-indigo-500', icon: <User size={20} className="text-white" /> },
@@ -9,10 +11,22 @@ const AVATARS = [
     { id: 5, gradient: 'from-teal-400 to-emerald-500', icon: <Bot size={20} className="text-white" /> },
 ];
 
-export default function Window() {
+interface WindowProps {
+    settings: WidgetSettings['window'];
+    onChange: <K extends keyof WidgetSettings['window']>(key: K, value: WidgetSettings['window'][K]) => void;
+}
+
+export default function Window({ settings, onChange }: WindowProps) {
     const [isOpenHD, setIsOpenHD] = useState(false);
     const [isOpenD, setIsOpenD] = useState(false);
     const [isOpenMB, setIsOpenMB] = useState(false);
+
+    const updateBorderRadius = (corner: 'tl' | 'tr' | 'br' | 'bl', value: number) => {
+        onChange('messageBorderRadius', {
+            ...settings.messageBorderRadius,
+            [corner]: value
+        });
+    };
 
     return (
         <s-stack gap="base">
@@ -31,12 +45,13 @@ export default function Window() {
                         <s-stack gap="small" padding="small base base">
                             <div style={{ display: "flex", gap: "8px" }}>
                                 {AVATARS.map((avatar) => {
-                                    const isActive = avatar.id === 2;
+                                    const isActive = avatar.id === settings.avatarId;
 
                                     return (
                                         <button
                                             key={avatar.id}
                                             type="button"
+                                            onClick={() => onChange('avatarId', avatar.id)}
                                             style={{
                                                 /* 🔥 reset default button styles */
                                                 appearance: "none",
@@ -90,8 +105,18 @@ export default function Window() {
                                     );
                                 })}
                             </div>
-                            <s-text-field label="Header Title" value="StartStorez Assistant" placeholder="Enter header title" />
-                            <s-text-field label="Header SubTitle" value="Typically replies instantly" placeholder="Enter header subtitle" />
+                            <s-text-field
+                                label="Header Title"
+                                value={settings.title}
+                                placeholder="Enter header title"
+                                onChange={(e: CallbackEvent<'s-text-field'>) => onChange('title', (e.target as HTMLInputElement).value)}
+                            />
+                            <s-text-field
+                                label="Header SubTitle"
+                                value={settings.subtitle}
+                                placeholder="Enter header subtitle"
+                                onChange={(e: CallbackEvent<'s-text-field'>) => onChange('subtitle', (e.target as HTMLInputElement).value)}
+                            />
                         </s-stack>
                     </>
                 )}
@@ -111,9 +136,27 @@ export default function Window() {
                     <>
                         <s-divider />
                         <s-stack gap="small" padding="small-200 base base">
-                            <s-number-field label="Window Width" min={0} max={50} step={1} defaultValue="8" suffix="px" />
-                            <s-number-field label="Window Height" min={0} max={50} step={1} defaultValue="12" suffix="px" />
-                            <s-number-field label="Corner Radius" min={0} max={50} step={1} defaultValue="12" suffix="px" />
+                            <s-number-field
+                                label="Window Width"
+                                min={250} max={600} step={10}
+                                value={settings.width.toString()}
+                                suffix="px"
+                                onChange={(e: CallbackEvent<'s-number-field'>) => onChange('width', parseFloat((e.target as HTMLInputElement).value))}
+                            />
+                            <s-number-field
+                                label="Window Height"
+                                min={300} max={900} step={10}
+                                value={settings.height.toString()}
+                                suffix="px"
+                                onChange={(e: CallbackEvent<'s-number-field'>) => onChange('height', parseFloat((e.target as HTMLInputElement).value))}
+                            />
+                            <s-number-field
+                                label="Corner Radius"
+                                min={0} max={50} step={1}
+                                value={settings.cornerRadius.toString()}
+                                suffix="px"
+                                onChange={(e: CallbackEvent<'s-number-field'>) => onChange('cornerRadius', parseFloat((e.target as HTMLInputElement).value))}
+                            />
                         </s-stack>
                     </>
                 )}
@@ -133,12 +176,42 @@ export default function Window() {
                     <>
                         <s-divider />
                         <s-stack gap="small" padding="none small small">
-                            <s-number-field label="Vertical Padding" min={0} max={50} step={1} defaultValue="12" suffix="px" />
+                            <s-number-field
+                                label="Vertical Padding"
+                                min={0} max={50} step={1}
+                                value={settings.messageVerticalPadding.toString()}
+                                suffix="px"
+                                onChange={(e: CallbackEvent<'s-number-field'>) => onChange('messageVerticalPadding', parseFloat((e.target as HTMLInputElement).value))}
+                            />
                             <s-grid gridTemplateColumns="1fr 1fr 1fr 1fr" gap="small">
-                                <s-number-field label="Radius TL" min={0} max={50} step={1} defaultValue="12" suffix="px" />
-                                <s-number-field label="Radius TR" min={0} max={50} step={1} defaultValue="12" suffix="px" />
-                                <s-number-field label="Radius BR" min={0} max={50} step={1} defaultValue="12" suffix="px" />
-                                <s-number-field label="Radius BL" min={0} max={50} step={1} defaultValue="12" suffix="px" />
+                                <s-number-field
+                                    label="Radius TL"
+                                    min={0} max={50} step={1}
+                                    value={settings.messageBorderRadius.tl.toString()}
+                                    suffix="px"
+                                    onChange={(e: CallbackEvent<'s-number-field'>) => updateBorderRadius('tl', parseFloat((e.target as HTMLInputElement).value))}
+                                />
+                                <s-number-field
+                                    label="Radius TR"
+                                    min={0} max={50} step={1}
+                                    value={settings.messageBorderRadius.tr.toString()}
+                                    suffix="px"
+                                    onChange={(e: CallbackEvent<'s-number-field'>) => updateBorderRadius('tr', parseFloat((e.target as HTMLInputElement).value))}
+                                />
+                                <s-number-field
+                                    label="Radius BR"
+                                    min={0} max={50} step={1}
+                                    value={settings.messageBorderRadius.br.toString()}
+                                    suffix="px"
+                                    onChange={(e: CallbackEvent<'s-number-field'>) => updateBorderRadius('br', parseFloat((e.target as HTMLInputElement).value))}
+                                />
+                                <s-number-field
+                                    label="Radius BL"
+                                    min={0} max={50} step={1}
+                                    value={settings.messageBorderRadius.bl.toString()}
+                                    suffix="px"
+                                    onChange={(e: CallbackEvent<'s-number-field'>) => updateBorderRadius('bl', parseFloat((e.target as HTMLInputElement).value))}
+                                />
                             </s-grid>
                         </s-stack>
                     </>
