@@ -13,7 +13,10 @@ database.sqlite
 
 .env
 
-
+.agent
+.agents
+.agent/
+.agents/
 
 /prisma/migrations
 

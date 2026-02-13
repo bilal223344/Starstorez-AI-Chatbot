@@ -46,6 +46,7 @@ export interface MasterState {
 
         // --- 5. Secondary Text Color ---
         secondaryTextColor: string;
+        headerIcon?: string;
 
         fontFamily: string;
         fontSize: number;

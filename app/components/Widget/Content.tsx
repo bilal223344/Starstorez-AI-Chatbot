@@ -8,7 +8,8 @@ interface ContentProps {
 }
 
 export default function Content({ settings, onChange }: ContentProps) {
-    const [isOpenDisplayRule, setIsOpenDisplayRule] = useState(true);
+    const [isOpenWelcome, setIsOpenWelcome] = useState(true);
+    const [isOpenQuickActions, setIsOpenQuickActions] = useState(true);
 
     const handleActionChange = (index: number, value: string) => {
         const newActions = [...settings.quickActions];
@@ -29,14 +30,14 @@ export default function Content({ settings, onChange }: ContentProps) {
         <s-stack gap="base">
             {/* Welcome Message Section */}
             < s-section padding="none" >
-                <s-clickable onClick={() => setIsOpenDisplayRule(!isOpenDisplayRule)}>
+                <s-clickable onClick={() => setIsOpenWelcome(!isOpenWelcome)}>
                     <s-stack padding="small base" gap="small" justifyContent="space-between" alignItems="center" direction="inline">
                         <s-heading><span style={{ fontSize: "1.1em", fontWeight: 600 }}>Welcome Message</span></s-heading>
-                        <s-icon type={isOpenDisplayRule ? "chevron-up" : "chevron-down"} />
+                        <s-icon type={isOpenWelcome ? "chevron-up" : "chevron-down"} />
                     </s-stack>
                 </s-clickable>
 
-                {isOpenDisplayRule && (
+                {isOpenWelcome && (
                     <>
                         <s-divider />
                         <s-stack gap="small" padding="small-200 base base">
@@ -53,14 +54,14 @@ export default function Content({ settings, onChange }: ContentProps) {
 
             {/* Quick Actions Section */}
             < s-section padding="none" >
-                <s-clickable onClick={() => setIsOpenDisplayRule(!isOpenDisplayRule)}>
+                <s-clickable onClick={() => setIsOpenQuickActions(!isOpenQuickActions)}>
                     <s-stack padding="small base" gap="small" justifyContent="space-between" alignItems="center" direction="inline">
                         <s-heading><span style={{ fontSize: "1.1em", fontWeight: 600 }}>Quick Actions</span></s-heading>
-                        <s-icon type={isOpenDisplayRule ? "chevron-up" : "chevron-down"} />
+                        <s-icon type={isOpenQuickActions ? "chevron-up" : "chevron-down"} />
                     </s-stack>
                 </s-clickable>
 
-                {isOpenDisplayRule && (
+                {isOpenQuickActions && (
                     <>
                         <s-divider />
                         <s-stack gap="small" padding="small-200 base base">

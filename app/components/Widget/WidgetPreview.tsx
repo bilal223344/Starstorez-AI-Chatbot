@@ -6,6 +6,12 @@ import {
     MessageCircle,
     MessageSquare,
     MessageSquareDot,
+    BotMessageSquare,
+    MessageCirclePlus,
+    MessageSquareMore,
+    MessageSquareQuote,
+    MessageSquareText,
+    MessagesSquare,
     Headset,
     Lightbulb,
     HelpCircle,
@@ -29,11 +35,29 @@ export default function WidgetPreview({ settings }: WidgetPreviewProps) {
     const [isPreviewOpen, setIsPreviewOpen] = useState(true);
     const [resetKey, setResetKey] = useState(0);
 
+    // Helper function to get font family with fallbacks
+    const getFontFamily = (fontName: string): string => {
+        if (!fontName) return "Inter, sans-serif";
+        if (fontName.includes(' ')) {
+            return `"${fontName}", sans-serif`;
+        }
+        return `${fontName}, sans-serif`;
+    };
+
+    // --- THEME ENGINE ---
+    const primaryThemeBackground = branding.colorMode === 'gradient'
+        ? `linear-gradient(135deg, ${branding.gradientStart}, ${branding.gradientEnd})`
+        : branding.primaryColor;
+
+    const primaryThemeColor = branding.colorMode === 'gradient'
+        ? branding.gradientStart || branding.primaryColor
+        : branding.primaryColor;
+
     const getActiveAvatar = () => {
         // Mock avatar mapping
         return {
             icon: <Headset size={20} />,
-            gradient: "linear-gradient(135deg, #3b82f6, #2563eb)"
+            gradient: primaryThemeBackground
         };
     };
 
@@ -42,6 +66,12 @@ export default function WidgetPreview({ settings }: WidgetPreviewProps) {
             "message-circle": MessageCircle,
             "message-square": MessageSquare,
             "message-square-dot": MessageSquareDot,
+            "bot-message-square": BotMessageSquare,
+            "message-circle-plus": MessageCirclePlus,
+            "message-square-more": MessageSquareMore,
+            "message-square-quote": MessageSquareQuote,
+            "message-square-text": MessageSquareText,
+            "messages-square": MessagesSquare,
             "headset": Headset,
             "lightbulb": Lightbulb,
             "help-circle": HelpCircle,
@@ -55,16 +85,16 @@ export default function WidgetPreview({ settings }: WidgetPreviewProps) {
     return (
         <div
             style={{
-                flex: 1,
                 backgroundColor: "rgba(241, 245, 249, 0.5)",
                 position: "relative",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 overflow: "hidden",
-                minHeight: "900px",
+                height: "100%",
                 width: "100%",
-                borderRadius: "12px"
+                borderRadius: "12px",
+                minHeight: "600px", // Reduced min height to prevent overflow on smaller screens
             }}
         >
             {/* Background Grid */}
@@ -166,6 +196,41 @@ export default function WidgetPreview({ settings }: WidgetPreviewProps) {
                     })
                 }}
             >
+                <style>{`
+                    .custom-scrollbar::-webkit-scrollbar {
+                        width: 6px;
+                        height: 6px;
+                    }
+                    .custom-scrollbar::-webkit-scrollbar-track {
+                        background: transparent;
+                    }
+                    .custom-scrollbar::-webkit-scrollbar-thumb {
+                        background-color: rgba(0, 0, 0, 0.2);
+                        border-radius: 10px;
+                    }
+                    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+                        background-color: rgba(0, 0, 0, 0.3);
+                    }
+                    /* Firefox */
+                    .custom-scrollbar::-webkit-scrollbar {
+                        scrollbar-width: thin;
+                        scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+                    }
+
+                    /* Launcher Animations */
+                    @keyframes anim-pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+                    @keyframes anim-bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+                    @keyframes anim-shake { 0% { transform: rotate(0deg); } 25% { transform: rotate(-3deg); } 75% { transform: rotate(3deg); } 100% { transform: rotate(0deg); } }
+                    @keyframes anim-rotate { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+                    @keyframes anim-glow { 0%, 100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); } 50% { box-shadow: 0 0 10px 2px rgba(99, 102, 241, 0.3); } }
+
+                    /* Window Transitions */
+                    @keyframes window-fade-in { from { opacity: 0; } to { opacity: 1; } }
+                    @keyframes window-slide-in { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+                    @keyframes window-scale-in { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+                    @keyframes window-rotate-in { from { opacity: 0; transform: rotate(-5deg) scale(0.9); } to { opacity: 1; transform: rotate(0) scale(1); } }
+                `}</style>
+
                 {/* Mock Website Content */}
                 <div style={{ width: "100%", height: "100%", backgroundColor: "#fff", display: "flex", flexDirection: "column", pointerEvents: "none", userSelect: "none", opacity: 0.4, filter: "grayscale(100%)" }}>
                     <div style={{ height: "64px", borderBottom: "1px solid #f1f5f9", display: "flex", alignItems: "center", padding: "0 32px", justifyContent: "space-between", backgroundColor: "#fff" }}>
@@ -198,7 +263,9 @@ export default function WidgetPreview({ settings }: WidgetPreviewProps) {
                             zIndex: 50,
                             bottom: `${launcher.marginV}px`,
                             [launcher.position]: `${launcher.marginH}px`,
-                            alignItems: launcher.position === 'left' ? 'flex-start' : 'flex-end'
+                            alignItems: launcher.position === 'left' ? 'flex-start' : 'flex-end',
+                            maxWidth: `calc(100% - ${launcher.marginH * 2}px)`,
+                            maxHeight: `calc(100% - ${launcher.marginV * 2}px)`
                         }}
                     >
                         {/* Chat Window */}
@@ -209,12 +276,17 @@ export default function WidgetPreview({ settings }: WidgetPreviewProps) {
                                     flexDirection: "column",
                                     boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
                                     overflow: "hidden",
-                                    width: isMobilePreview ? "340px" : `${windowSettings.width}px`,
-                                    height: isMobilePreview ? "550px" : `${windowSettings.height}px`,
+                                    width: isMobilePreview ? "100%" : `${windowSettings.width}px`,
+                                    height: isMobilePreview ? "100%" : `${windowSettings.height}px`,
+                                    maxWidth: "100%",
+                                    maxHeight: "100%",
                                     borderRadius: `${windowSettings.cornerRadius}px`,
                                     backgroundColor: branding.backgroundColor,
-                                    fontFamily: branding.fontFamily,
-                                    transition: "all 0.3s ease-out"
+                                    fontFamily: getFontFamily(branding.fontFamily),
+                                    transition: "all 0.3s ease-out",
+                                    animation: launcher.windowTransition.type === 'instant'
+                                        ? 'none'
+                                        : `window-${launcher.windowTransition.type}-in ${launcher.windowTransition.duration}s ease-out forwards`
                                 }}
                             >
                                 {/* Header */}
@@ -228,9 +300,10 @@ export default function WidgetPreview({ settings }: WidgetPreviewProps) {
                                         flexShrink: 0,
                                         boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
                                         zIndex: 10,
-                                        backgroundColor: branding.primaryColor,
-                                        color: "#FFF",
-                                        height: "70px" // Using a standard header height
+                                        background: primaryThemeBackground,
+                                        color: branding.textColor || "#FFF",
+                                        height: "70px",
+                                        fontFamily: getFontFamily(branding.fontFamily),
                                     }}
                                 >
                                     <div style={{ position: "relative" }}>
@@ -241,9 +314,10 @@ export default function WidgetPreview({ settings }: WidgetPreviewProps) {
                                             display: "flex",
                                             alignItems: "center",
                                             justifyContent: "center",
-                                            color: "white",
+                                            color: branding.textColor || "white",
                                             boxShadow: "inset 0 2px 4px rgba(0,0,0,0.06)",
-                                            background: getActiveAvatar().gradient
+                                            background: "rgba(255, 255, 255, 0.2)",
+                                            border: "2px solid rgba(255, 255, 255, 0.2)"
                                         }}>
                                             {getActiveAvatar().icon}
                                         </div>
@@ -263,23 +337,24 @@ export default function WidgetPreview({ settings }: WidgetPreviewProps) {
                                 </div>
 
                                 {/* Messages Body */}
-                                <div style={{ flex: 1, padding: "20px", overflowY: "auto", backgroundColor: "rgba(241, 245, 249, 0.5)", display: "flex", flexDirection: "column", gap: `${windowSettings.messageVerticalPadding}px` }}>
+                                <div className="custom-scrollbar" style={{ flex: 1, padding: "20px", overflowY: "auto", backgroundColor: "rgba(241, 245, 249, 0.5)", display: "flex", flexDirection: "column", gap: `${windowSettings.messageVerticalPadding}px` }}>
                                     <div style={{ display: "flex", justifyContent: "center", marginBottom: "16px" }}>
                                         <span style={{ fontSize: "10px", fontWeight: 500, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", backgroundColor: "rgba(241, 245, 249, 0.8)", padding: "4px 12px", borderRadius: "9999px", backdropFilter: "blur(4px)" }}>Today</span>
                                     </div>
 
                                     {/* AI Message */}
                                     <div style={{ display: "flex", gap: "12px" }}>
-                                        <div style={{ width: "32px", height: "32px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: getActiveAvatar().gradient, boxShadow: "0 1px 2px rgba(0,0,0,0.05)", alignSelf: "flex-end", marginBottom: "4px" }}>
+                                        <div style={{ width: "32px", height: "32px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, background: primaryThemeBackground, boxShadow: "0 1px 2px rgba(0,0,0,0.05)", alignSelf: "flex-end", marginBottom: "4px", color: branding.textColor || "white" }}>
                                             {getActiveAvatar().icon}
                                         </div>
                                         <div style={{ display: "flex", flexDirection: "column", gap: "4px", maxWidth: "85%" }}>
                                             <div style={{
                                                 fontSize: `${branding.fontSize}px`,
+                                                fontWeight: branding.fontWeight || "400",
                                                 boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
                                                 lineHeight: 1.5,
-                                                backgroundColor: "#f1f5f9",
-                                                color: "#0f172a",
+                                                background: primaryThemeBackground,
+                                                color: branding.textColor || "#ffffff",
                                                 borderRadius: `${windowSettings.messageBorderRadius.tl}px ${windowSettings.messageBorderRadius.tr}px ${windowSettings.messageBorderRadius.br}px ${windowSettings.messageBorderRadius.bl}px`,
                                                 padding: "12px 16px"
                                             }}>
@@ -292,34 +367,75 @@ export default function WidgetPreview({ settings }: WidgetPreviewProps) {
                                     {/* Product Slider */}
                                     {addOns.productSlider.enabled && (
                                         <div style={{ display: "flex", gap: "12px", paddingLeft: "44px" }}>
-                                            <div style={{ display: "flex", overflowX: "auto", paddingBottom: "16px", marginLeft: "-8px", paddingLeft: "8px", maxWidth: "100%", gap: "12px" }}>
-                                                {[{ name: "Abstract Art Print", price: "$45.00", img: "https://images.unsplash.com/photo-1579783902614-a3fb392796a5?auto=format&fit=crop&w=300&q=80" }, { name: "Ceramic Vase", price: "$28.50", img: "https://images.unsplash.com/photo-1612196808214-b7e239e5f6b7?auto=format&fit=crop&w=300&q=80" }].map((item, idx) => (
+                                            <div className="custom-scrollbar" style={{ display: "flex", overflowX: "auto", paddingBottom: "16px", marginLeft: "-8px", paddingLeft: "8px", maxWidth: "100%", gap: "12px" }}>
+                                                {[
+                                                    { name: "Abstract Art Print", price: "$45.00", img: "https://images.unsplash.com/photo-1579783902614-a3fb392796a5?auto=format&fit=crop&w=300&q=80", stock: 10, handle: "abstract-art-print" },
+                                                    { name: "Ceramic Vase", price: "$28.50", img: "https://images.unsplash.com/photo-1612196808214-b7e239e5f6b7?auto=format&fit=crop&w=300&q=80", stock: 0, handle: "ceramic-vase" }
+                                                ].map((item, idx) => (
                                                     <div key={idx} style={{
                                                         flexShrink: 0,
                                                         display: "flex",
                                                         flexDirection: "column",
+                                                        justifyContent: "space-between",
                                                         boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
                                                         transition: "all 0.2s",
                                                         backgroundColor: addOns.productSlider.cardBackground,
                                                         overflow: "hidden",
-                                                        cursor: "pointer",
                                                         width: `${addOns.productSlider.cardWidth}px`,
-                                                        height: `${addOns.productSlider.cardHeight}px`,
-                                                        padding: "12px",
-                                                        borderRadius: "12px",
-                                                        border: "1px solid #e2e8f0"
+                                                        height: "auto", // Allow height to grow
+                                                        minHeight: `${addOns.productSlider.cardHeight}px`,
+                                                        padding: "8px",
+                                                        borderRadius: "8px",
+                                                        border: "1px solid #e1e3e5"
                                                     }}>
-                                                        <div style={{ width: "100%", backgroundColor: "#f1f5f9", overflow: "hidden", marginBottom: "12px", flexShrink: 0, position: "relative", height: "100px", borderRadius: "8px" }}>
-                                                            <img src={item.img} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                                                        </div>
-                                                        <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-                                                            <h4 style={{ fontWeight: 600, color: "#0f172a", fontSize: "14px", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</h4>
-                                                            <div style={{ color: "#64748b", marginTop: "2px", fontSize: "12px" }}>{item.price}</div>
-                                                            <div style={{ marginTop: "auto", paddingTop: "8px", display: "flex", justifyContent: "flex-end" }}>
-                                                                <button style={{ display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "50%", border: "1px solid transparent", backgroundColor: "transparent", color: branding.primaryColor, cursor: "pointer", width: "32px", height: "32px" }}>
-                                                                    <MessageCircle size={18} />
-                                                                </button>
+                                                        <div>
+                                                            <div style={{ width: "100%", height: "100px", overflow: "hidden", borderRadius: "6px", marginBottom: "8px" }}>
+                                                                <img src={item.img} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                                                             </div>
+                                                            <div style={{ padding: "4px 0" }}>
+                                                                <h4 style={{ margin: "0 0 4px", fontWeight: "600", color: "#202223", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontSize: "13px" }} title={item.name}>{item.name}</h4>
+                                                                <p style={{ margin: 0, color: primaryThemeColor, fontWeight: "bold", fontSize: "13px" }}>
+                                                                    {item.price}
+                                                                    {item.stock <= 0 && <span style={{ color: "#d82c0d", fontSize: "11px", fontWeight: "600", marginLeft: "6px" }}>Sold Out</span>}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+
+                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '8px' }}>
+                                                            <button
+                                                                style={{
+                                                                    display: "block",
+                                                                    background: "#f1f2f3",
+                                                                    textAlign: "center",
+                                                                    textDecoration: "none",
+                                                                    color: "#202223",
+                                                                    padding: "6px",
+                                                                    borderRadius: "6px",
+                                                                    fontSize: "12px",
+                                                                    fontWeight: "500",
+                                                                    border: "none",
+                                                                    cursor: "pointer",
+                                                                    width: "100%",
+                                                                    fontFamily: "inherit"
+                                                                }}
+                                                            >
+                                                                View Details
+                                                            </button>
+                                                            <button
+                                                                style={{
+                                                                    background: "none",
+                                                                    border: `1px solid ${primaryThemeColor}`,
+                                                                    color: primaryThemeColor,
+                                                                    padding: "4px",
+                                                                    borderRadius: "6px",
+                                                                    fontSize: "11px",
+                                                                    cursor: "pointer",
+                                                                    fontWeight: "500",
+                                                                    width: "100%"
+                                                                }}
+                                                            >
+                                                                Ask AI
+                                                            </button>
                                                         </div>
                                                     </div>
                                                 ))}
@@ -327,17 +443,36 @@ export default function WidgetPreview({ settings }: WidgetPreviewProps) {
                                         </div>
                                     )}
 
+                                    {/* User Message (Mock) */}
+                                    <div style={{ display: "flex", gap: "12px", alignSelf: "flex-end" }}>
+                                        <div style={{ display: "flex", flexDirection: "column", gap: "4px", maxWidth: "85%", alignItems: "flex-end" }}>
+                                            <div style={{
+                                                fontSize: `${branding.fontSize}px`,
+                                                fontWeight: branding.fontWeight || "400",
+                                                boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                                                lineHeight: 1.5,
+                                                backgroundColor: branding.secondaryColor || "#f1f1f1",
+                                                color: branding.secondaryTextColor || "#000000",
+                                                borderRadius: `${windowSettings.messageBorderRadius.tl}px ${windowSettings.messageBorderRadius.tr}px ${windowSettings.messageBorderRadius.br}px ${windowSettings.messageBorderRadius.bl}px`,
+                                                padding: "12px 16px"
+                                            }}>
+                                                How can I track my order?
+                                            </div>
+                                            <div style={{ fontSize: "10px", color: "#94a3b8", marginRight: "4px" }}>10:43 AM</div>
+                                        </div>
+                                    </div>
+
                                     {/* Quick Actions */}
-                                    <div style={{ paddingLeft: "44px", overflowX: "auto", display: "flex", paddingBottom: "8px", gap: "8px" }}>
+                                    <div style={{ paddingLeft: "44px", display: "flex", gap: "8px", flexShrink: 0, marginTop: "auto", maxWidth: "100%", flexWrap: "wrap", paddingBottom: "8px" }}>
                                         {content.quickActions.map(action => (
                                             <button key={action} style={{
                                                 backgroundColor: "#fff",
-                                                border: "1px solid #e2e8f0",
+                                                border: `1px solid ${primaryThemeColor}`,
                                                 fontWeight: 500,
                                                 whiteSpace: "nowrap",
                                                 transition: "all 0.2s",
                                                 boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-                                                color: "#475569",
+                                                color: primaryThemeColor,
                                                 padding: "8px 16px",
                                                 borderRadius: "12px",
                                                 fontSize: "13px",
@@ -360,12 +495,13 @@ export default function WidgetPreview({ settings }: WidgetPreviewProps) {
                                                 borderRadius: "12px",
                                                 transition: "box-shadow 0.2s",
                                                 backgroundColor: "#f8fafc",
-                                                color: "#0f172a",
+                                                color: branding.secondaryTextColor || "#0f172a",
                                                 fontSize: "14px",
                                                 padding: "12px 16px",
                                                 paddingRight: "48px",
                                                 border: "none",
-                                                outline: "none"
+                                                outline: "none",
+                                                fontFamily: getFontFamily(branding.fontFamily)
                                             }}
                                         />
                                         <button
@@ -377,8 +513,8 @@ export default function WidgetPreview({ settings }: WidgetPreviewProps) {
                                                 justifyContent: "center",
                                                 transition: "all 0.2s",
                                                 boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-                                                backgroundColor: branding.primaryColor,
-                                                color: "#fff",
+                                                background: primaryThemeBackground,
+                                                color: branding.textColor || "#fff",
                                                 width: "32px",
                                                 height: "32px",
                                                 borderRadius: "8px",
@@ -407,11 +543,14 @@ export default function WidgetPreview({ settings }: WidgetPreviewProps) {
                                 justifyContent: "center",
                                 boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)",
                                 transition: "all 0.2s",
+                                animation: launcher.animation.type === 'static'
+                                    ? 'none'
+                                    : `anim-${launcher.animation.type} ${launcher.animation.duration}s infinite ease-in-out`,
                                 width: `${launcher.iconSize}px`,
                                 height: `${launcher.iconSize}px`,
                                 borderRadius: "50%",
-                                backgroundColor: branding.primaryColor,
-                                color: "#FFF",
+                                background: primaryThemeBackground,
+                                color: branding.textColor || "#FFF",
                                 border: "none",
                                 cursor: "pointer"
                             }}

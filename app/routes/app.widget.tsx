@@ -95,6 +95,17 @@ export default function Widget() {
         }));
     }, []);
 
+    // Handle bulk updates from child components
+    const handleBulkChange = useCallback(<T extends keyof WidgetSettings>(section: T, changes: Partial<WidgetSettings[T]>) => {
+        setSettings(prev => ({
+            ...prev,
+            [section]: {
+                ...prev[section],
+                ...changes
+            }
+        }));
+    }, []);
+
     // Save handler
     const handleSave = () => {
         submit({ settings: JSON.stringify(settings) }, { method: "post" });
@@ -109,6 +120,7 @@ export default function Widget() {
                 body: JSON.stringify({ prompt })
             });
             const data = await response.json();
+            console.log("[data]", data);
             if (data.settings) {
                 setSettings(prev => ({
                     ...prev,
@@ -216,6 +228,7 @@ export default function Widget() {
                                 <Branding
                                     settings={settings.branding}
                                     onChange={(key, value) => handleSettingChange('branding', key, value)}
+                                    onBulkChange={(changes) => handleBulkChange('branding', changes)}
                                     onGenerate={handleGenerateTheme}
                                     isGenerating={isGeneratingTheme}
                                 />

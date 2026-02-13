@@ -168,6 +168,8 @@ declare global {
                 background?: string;
                 inlineSize?: string;
                 onClick?: () => void;
+                style?: React.CSSProperties;
+                blockSize?: string;
             };
             's-image': React.HTMLAttributes<HTMLElement> & {
                 src?: string;

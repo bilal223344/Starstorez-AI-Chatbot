@@ -199,6 +199,12 @@ export interface WidgetSettings {
         backgroundColor: string;
         fontFamily: string;
         fontSize: number;
+        colorMode?: "solid" | "gradient";
+        gradientStart?: string;
+        gradientEnd?: string;
+        textColor?: string;
+        secondaryTextColor?: string;
+        fontWeight?: string;
     };
     window: {
         title: string;

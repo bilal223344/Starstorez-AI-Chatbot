@@ -1,9 +1,7 @@
 import { MasterState } from "app/routes/app.customization";
-import { useState } from "react";
+import { useState, ElementType } from "react";
 import {
     IconSend,
-    IconX,
-    IconMinus,
     IconMessageCircle,
     IconMessage,
     IconMessage2,
@@ -22,6 +20,18 @@ import {
     IconSend2,
     IconInfoCircle
 } from "@tabler/icons-react";
+import {
+    X,
+    Bot,
+    User,
+    Check,
+    Send,
+    Minus,
+    MessageCircle,
+    MoreVertical,
+    ChevronDown,
+    ArrowDown
+} from "lucide-react";
 
 interface ChatbotPreviewProps {
     data: MasterState;
@@ -58,6 +68,23 @@ export default function ChatbotPreview({ data }: ChatbotPreviewProps) {
         }
         return `${fontName}, sans-serif`;
     };
+
+    // Icon mapping for header icon
+    // Icon mapping for header icon
+    const headerIconMap: Record<string, ElementType> = {
+        'close': X,
+        'bot': Bot,
+        'customer': User,
+        'check': Check,
+        'send': Send,
+        'minus': Minus,
+        'message-circle': MessageCircle,
+        'more-vertical': MoreVertical,
+        'x': X,
+        'chevron-down': ChevronDown,
+        'arrow-down': ArrowDown,
+    };
+    const HeaderIcon = headerIconMap[chatWindow.headerIcon || 'minus'] || Minus;
 
     // Icon mapping for send button
     const getSendIcon = () => {
@@ -121,7 +148,7 @@ export default function ChatbotPreview({ data }: ChatbotPreviewProps) {
     const primaryThemeBackground = chatWindow.colorMode === 'gradient'
         ? `linear-gradient(135deg, ${chatWindow.gradientStart}, ${chatWindow.gradientEnd})`
         : chatWindow.primaryColor;
-    
+
     // For borders and text colors, we need a solid color (use gradientStart when in gradient mode)
     const primaryThemeColor = chatWindow.colorMode === 'gradient'
         ? chatWindow.gradientStart
@@ -277,6 +304,27 @@ export default function ChatbotPreview({ data }: ChatbotPreviewProps) {
                 }}>
 
                     {/* 1. Header */}
+                    <style>{`
+                        .custom-scrollbar::-webkit-scrollbar {
+                            width: 6px;
+                            height: 6px;
+                        }
+                        .custom-scrollbar::-webkit-scrollbar-track {
+                            background: transparent;
+                        }
+                        .custom-scrollbar::-webkit-scrollbar-thumb {
+                            background-color: rgba(0, 0, 0, 0.2);
+                            border-radius: 10px;
+                        }
+                        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+                            background-color: rgba(0, 0, 0, 0.3);
+                        }
+                        /* Firefox */
+                        .custom-scrollbar {
+                            scrollbar-width: thin;
+                            scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+                        }
+                    `}</style>
                     <div style={headerStyle}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                             {topNav.avatar && (
@@ -304,7 +352,7 @@ export default function ChatbotPreview({ data }: ChatbotPreviewProps) {
                                 title="Minimize"
                                 aria-label="Minimize chat"
                             >
-                                <IconMinus size={18} color={chatWindow.textColor || "#fff"} />
+                                <HeaderIcon size={18} color={chatWindow.textColor || "#fff"} />
                             </button>
                             <button
                                 type="button"
@@ -313,13 +361,13 @@ export default function ChatbotPreview({ data }: ChatbotPreviewProps) {
                                 title="Close"
                                 aria-label="Close chat"
                             >
-                                <IconX size={18} color={chatWindow.textColor || "#fff"} />
+                                <X size={18} color={chatWindow.textColor || "#fff"} />
                             </button>
                         </div>
                     </div>
 
                     {/* 2. Chat Body */}
-                    <div style={{ flex: 1, padding: "20px", overflowY: "auto", display: "flex", flexDirection: "column" }}>
+                    <div className="custom-scrollbar" style={{ flex: 1, padding: "20px", overflowY: "auto", display: "flex", flexDirection: "column" }}>
 
                         {/* Bot Greeting */}
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', width: '100%' }}>
@@ -350,8 +398,8 @@ export default function ChatbotPreview({ data }: ChatbotPreviewProps) {
 
                         {/* Product Slider */}
                         {productSlider.enabled && (
-                            <div style={{ 
-                                marginTop: '16px', 
+                            <div style={{
+                                marginTop: '16px',
                                 marginBottom: '16px',
                                 width: '100%'
                             }}>
@@ -372,13 +420,11 @@ export default function ChatbotPreview({ data }: ChatbotPreviewProps) {
                                     width: '100%',
                                     overflow: 'hidden'
                                 }}>
-                                    <div style={{
+                                    <div className="custom-scrollbar" style={{
                                         display: 'flex',
                                         gap: `${productSlider.cardGap}px`,
                                         overflowX: 'auto',
                                         overflowY: 'hidden',
-                                        scrollbarWidth: 'thin',
-                                        scrollbarColor: `${primaryThemeColor} transparent`,
                                         paddingBottom: '8px',
                                         WebkitOverflowScrolling: 'touch'
                                     }}>
@@ -434,8 +480,8 @@ export default function ChatbotPreview({ data }: ChatbotPreviewProps) {
                                                     alignItems: 'center',
                                                     justifyContent: 'center'
                                                 }}>
-                                                    <img 
-                                                        src={product.image} 
+                                                    <img
+                                                        src={product.image}
                                                         alt={product.title}
                                                         style={{
                                                             width: '100%',
@@ -510,9 +556,9 @@ export default function ChatbotPreview({ data }: ChatbotPreviewProps) {
                                                             title="Ask me more details"
                                                             aria-label="Ask for more product details"
                                                         >
-                                                            <IconInfoCircle 
-                                                                size={productSlider.askButtonSize * 0.7} 
-                                                                color={productSlider.askButtonIconColor} 
+                                                            <IconInfoCircle
+                                                                size={productSlider.askButtonSize * 0.7}
+                                                                color={productSlider.askButtonIconColor}
                                                             />
                                                         </button>
                                                     )}

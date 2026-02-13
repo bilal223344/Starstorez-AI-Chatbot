@@ -2,18 +2,24 @@ import { WidgetSettings } from "./types";
 
 export const DEFAULT_WIDGET_SETTINGS: WidgetSettings = {
     branding: {
-        primaryColor: "#000000",
-        secondaryColor: "#ffffff",
+        primaryColor: "#6366f1", // Modern Aurora Primary
+        secondaryColor: "#f3f4f6", // Modern Aurora Secondary
         backgroundColor: "#ffffff",
         fontFamily: "Inter",
         fontSize: 16,
+        colorMode: "gradient",
+        gradientStart: "#6366f1",
+        gradientEnd: "#a855f7",
+        textColor: "#ffffff",
+        secondaryTextColor: "#1f2937",
+        fontWeight: "400",
     },
     window: {
         title: "StartStorez Assistant",
         subtitle: "Typically replies instantly",
         avatarId: 2,
         width: 350,
-        height: 500,
+        height: 600,
         cornerRadius: 16,
         messageVerticalPadding: 12,
         messageBorderRadius: {
@@ -24,14 +30,14 @@ export const DEFAULT_WIDGET_SETTINGS: WidgetSettings = {
         }
     },
     launcher: {
-        iconId: "message-circle",
+        iconId: "bot", // Changing to 'bot' as part of 'best' preset
         position: "right",
         marginH: 20,
         marginV: 20,
         iconSize: 56,
         animation: {
-            type: "static",
-            duration: 1
+            type: "pulse",
+            duration: 2
         },
         windowTransition: {
             type: "slide",

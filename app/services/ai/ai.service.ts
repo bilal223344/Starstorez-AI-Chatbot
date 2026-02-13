@@ -144,8 +144,14 @@ Return ONLY a JSON object that matches the following structure (Partial<WidgetSe
     "primaryColor": "string (hex)",
     "secondaryColor": "string (hex)",
     "backgroundColor": "string (hex)",
-    "fontFamily": "string (Inter, UI-Sans, etc)",
-    "fontSize": number (12-16)
+    "colorMode": "solid" | "gradient",
+    "gradientStart": "string (hex, required if colorMode is gradient)",
+    "gradientEnd": "string (hex, required if colorMode is gradient)",
+    "textColor": "string (hex, color of text on primary background)",
+    "secondaryTextColor": "string (hex, color of text on secondary/main background)",
+    "fontFamily": "string (Inter, Poppins, Roboto, etc)",
+    "fontSize": number (12-16),
+    "fontWeight": "300" | "400" | "500" | "600" | "700"
   },
   "window": {
     "title": "string",
@@ -153,6 +159,11 @@ Return ONLY a JSON object that matches the following structure (Partial<WidgetSe
     "cornerRadius": number (0-24)
   }
 }
+
+Use gradients for vibrant prompts. Ensure contrast between background and text colors.
+If colorMode is gradient, the primaryColor should still be provided as a fallback (usually same as gradientStart).
+fontWeight should be a string value like "400" or "600".
+
 
 The user's prompt is: "${prompt}"
 `;

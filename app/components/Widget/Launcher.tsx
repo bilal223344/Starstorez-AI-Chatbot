@@ -85,14 +85,14 @@ export default function Launcher({ settings, onChange }: LauncherProps) {
                         <s-stack gap="small" padding="small-200 base base">
                             <s-button-group gap="none">
                                 <s-button
-                                    variant={settings.position === 'right' ? "primary" : "secondary"}
                                     slot="secondary-actions"
+                                    icon={settings.position === 'right' ? "check" : ""}
                                     onClick={() => onChange('position', 'right')}
                                 >
                                     Right
                                 </s-button>
                                 <s-button
-                                    variant={settings.position === 'left' ? "primary" : "secondary"}
+                                    icon={settings.position === 'left' ? "check" : ""}
                                     slot="secondary-actions"
                                     onClick={() => onChange('position', 'left')}
                                 >
@@ -132,19 +132,32 @@ export default function Launcher({ settings, onChange }: LauncherProps) {
                     <>
                         <s-divider />
                         <s-stack gap="small" padding="small-200 base base">
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: "16px" }}>
+                                <style>{`
+                                    @keyframes anim-pulse { 0% { transform: scale(1); } 50% { transform: scale(1.05); } 100% { transform: scale(1); } }
+                                    @keyframes anim-bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+                                    @keyframes anim-shake { 0% { transform: rotate(0deg); } 25% { transform: rotate(-3deg); } 75% { transform: rotate(3deg); } 100% { transform: rotate(0deg); } }
+                                    @keyframes anim-rotate { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+                                    @keyframes anim-glow { 0%, 100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); } 50% { box-shadow: 0 0 10px 2px rgba(99, 102, 241, 0.3); } }
+                                `}</style>
                                 {(['static', 'pulse', 'bounce', 'shake', 'rotate', 'glow'] as const).map((anim) => (
-                                    <s-clickable
+                                    <div
                                         key={anim}
-                                        inlineSize="100px" blockSize="40px"
-                                        border={settings.animation.type === anim ? "large strong" : "base"}
-                                        borderRadius="base"
-                                        onClick={() => onChange('animation', { ...settings.animation, type: anim })}
+                                        style={{
+                                            animation: anim === 'static' ? 'none' : `anim-${anim} 2s infinite ease-in-out`
+                                        }}
                                     >
-                                        <div style={{ width: "100%", height: "100%", display: "flex", justifyContent: "center", alignContent: "center", alignItems: "center" }}>
-                                            <s-text>{anim.charAt(0).toUpperCase() + anim.slice(1)}</s-text>
-                                        </div>
-                                    </s-clickable>
+                                        <s-clickable
+                                            inlineSize="120px" blockSize="60px"
+                                            border={settings.animation.type === anim ? "large strong" : "base"}
+                                            borderRadius="base"
+                                            onClick={() => onChange('animation', { ...settings.animation, type: anim })}
+                                        >
+                                            <div style={{ width: "100%", height: "100%", display: "flex", justifyContent: "center", alignContent: "center", alignItems: "center" }}>
+                                                <s-text>{anim.charAt(0).toUpperCase() + anim.slice(1)}</s-text>
+                                            </div>
+                                        </s-clickable>
+                                    </div>
                                 ))}
                             </div>
                             <s-number-field
@@ -172,22 +185,33 @@ export default function Launcher({ settings, onChange }: LauncherProps) {
                     <>
                         <s-divider />
                         <s-stack gap="small" padding="small-200 base base">
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: "16px" }}>
+                                <style>{`
+                                    @keyframes trans-fade { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+                                    @keyframes trans-slide { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(4px); } }
+                                    @keyframes trans-scale { 0%, 100% { transform: scale(1); } 50% { transform: scale(0.95); } }
+                                    @keyframes trans-rotate { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(2deg); } }
+                                `}</style>
                                 {(['fade', 'slide', 'scale', 'rotate', 'instant'] as const).map((anim) => (
-                                    <s-clickable
+                                    <div
                                         key={anim}
-                                        inlineSize="100px" blockSize="40px"
-                                        border={settings.windowTransition.type === anim ? "large strong" : "base"}
-                                        borderRadius="base"
-                                        onClick={() => onChange('windowTransition', { ...settings.windowTransition, type: anim })}
+                                        style={{
+                                            animation: anim === 'instant' ? 'none' : `trans-${anim} 2s infinite ease-in-out`
+                                        }}
                                     >
-                                        <div style={{ width: "100%", height: "100%", display: "flex", justifyContent: "center", alignContent: "center", alignItems: "center" }}>
-                                            <s-text>
-                                                {anim === 'instant' ? 'Instant' : anim.charAt(0).toUpperCase() + anim.slice(1) + ' Out'}
-                                                {/* UI text was 'Fade Out', 'Slide Down' etc. Keeping generic internal names */}
-                                            </s-text>
-                                        </div>
-                                    </s-clickable>
+                                        <s-clickable
+                                            inlineSize="120px" blockSize="60px"
+                                            border={settings.windowTransition.type === anim ? "large strong" : "base"}
+                                            borderRadius="base"
+                                            onClick={() => onChange('windowTransition', { ...settings.windowTransition, type: anim })}
+                                        >
+                                            <div style={{ width: "100%", height: "100%", display: "flex", justifyContent: "center", alignContent: "center", alignItems: "center" }}>
+                                                <s-text>
+                                                    {anim === 'instant' ? 'Instant' : anim.charAt(0).toUpperCase() + anim.slice(1)}
+                                                </s-text>
+                                            </div>
+                                        </s-clickable>
+                                    </div>
                                 ))}
                             </div>
                             <s-number-field
