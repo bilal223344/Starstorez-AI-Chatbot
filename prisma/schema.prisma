@@ -212,18 +212,19 @@ model ChatbotCustomization {
 }
 
 model ChatConfiguration {
-  id                     String   @id @default(uuid())
-  shop                   String   @unique
-  aiEnabled              Boolean  @default(true)
-  autoHandoffEnabled     Boolean  @default(true)
-  useKeywordResponses    Boolean  @default(true)
-  maxTokensPerResponse   Int      @default(500)
-  maxConcurrentRequests  Int      @default(5)
-  rateLimitPerMinute     Int      @default(60)
-  fallbackMessage        String?
-  manualChatNotification String?
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  id                         String   @id @default(uuid())
+  shop                       String   @unique
+  aiEnabled                  Boolean  @default(true)
+  autoHandoffEnabled         Boolean  @default(true)
+  useKeywordResponses        Boolean  @default(true)
+  discountSuggestionsEnabled Boolean  @default(true)
+  maxTokensPerResponse       Int      @default(500)
+  maxConcurrentRequests      Int      @default(5)
+  rateLimitPerMinute         Int      @default(60)
+  fallbackMessage            String?
+  manualChatNotification     String?
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
 
   @@index([shop])
 }

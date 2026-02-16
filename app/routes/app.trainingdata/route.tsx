@@ -35,7 +35,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             where: { shop },
             orderBy: { createdAt: 'desc' }
         });
-        return { discounts, hasDiscountScope: hasScope };
+
+        const config = await prisma.chatConfiguration.findUnique({
+            where: { shop },
+            select: { discountSuggestionsEnabled: true }
+        });
+
+        return { discounts, hasDiscountScope: hasScope, discountSuggestionsEnabled: config?.discountSuggestionsEnabled ?? true };
     };
 
     // Helper for Policies
@@ -333,9 +339,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             return Response.json({ success: true, message: "Product removed from campaign" });
         }
 
-        // --- DISCOUNT ACTIONS ---
+        if (actionType === "toggle_discounts_master") {
+            const enabled = formData.get("enabled") === "true";
+            await prisma.chatConfiguration.upsert({
+                where: { shop },
+                update: { discountSuggestionsEnabled: enabled },
+                create: { shop, discountSuggestionsEnabled: enabled }
+            });
+            return Response.json({ success: true, message: "Master discount setting updated" });
+        }
+
         if (actionType === "toggle_discount") {
-            const discountid = formData.get("id") as string;
+            const discountid = formData.get("discountId") as string;
             const isSuggested = formData.get("isSuggested") === "true";
 
             await prisma.discount.update({
@@ -653,7 +668,10 @@ export default function TrainingData() {
             case "discounts":
                 if (!loaderData.discounts) return null;
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                return <Discount discounts={(loaderData.discounts as any)?.discounts || []} />;
+                return <Discount 
+                    discounts={(loaderData.discounts as any)?.discounts || []} 
+                    discountSuggestionsEnabled={(loaderData.discounts as any)?.discountSuggestionsEnabled ?? true} 
+                />;
             case "policies":
                 if (!loaderData.policies) return null;
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any

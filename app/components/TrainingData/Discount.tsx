@@ -12,15 +12,23 @@ interface Discount {
     endsAt?: string | null;
 }
 
-export default function Discount({ discounts: initialDiscounts }: { discounts: Discount[] }) {
+export default function Discount({
+    discounts: initialDiscounts,
+    discountSuggestionsEnabled: initialMasterEnabled
+}: {
+    discounts: Discount[],
+    discountSuggestionsEnabled: boolean
+}) {
     const fetcher = useFetcher();
 
     const [discounts, setDiscounts] = useState<Discount[]>(initialDiscounts);
+    const [masterEnabled, setMasterEnabled] = useState(initialMasterEnabled);
 
     // Sync prop data
     useEffect(() => {
         setDiscounts(initialDiscounts);
-    }, [initialDiscounts]);
+        setMasterEnabled(initialMasterEnabled);
+    }, [initialDiscounts, initialMasterEnabled]);
 
     // Reload after sync action
     // Note: The parent loader revalidation should handle updating the data prop, 
@@ -30,24 +38,55 @@ export default function Discount({ discounts: initialDiscounts }: { discounts: D
 
 
     const handleSync = () => {
-        fetcher.submit({ intent: "syncDiscounts" }, { method: "post" });
+        fetcher.submit({ actionType: "sync_discounts" }, { method: "post" });
+    };
+
+    const handleMasterToggle = () => {
+        const newVal = !masterEnabled;
+        setMasterEnabled(newVal);
+        fetcher.submit(
+            { actionType: "toggle_discounts_master", enabled: newVal.toString() },
+            { method: "post" }
+        );
     };
 
     const handleToggle = (discountId: string, currentVal: boolean) => {
-        fetcher.submit(
-            { intent: "toggleDiscountSuggested", discountId, isSuggested: (!currentVal).toString() },
-            { method: "post" }
-        );
+        const newVal = !currentVal;
         // Optimistic update
         setDiscounts(prev => prev.map(d =>
-            d.id === discountId ? { ...d, isSuggested: !currentVal } : d
+            d.id === discountId ? { ...d, isSuggested: newVal } : d
         ));
+
+        fetcher.submit(
+            { actionType: "toggle_discount", discountId, isSuggested: newVal.toString() },
+            { method: "post" }
+        );
     };
 
     return (
         <s-stack gap="base">
+            <s-card>
+                <s-box padding="base">
+                    <s-stack direction="inline" justifyContent="space-between" alignItems="center">
+                        <s-stack gap="extra-tight">
+                            <s-text><strong>Master Discount Trigger</strong></s-text>
+                            <s-text color="subdued">
+                                {masterEnabled
+                                    ? "AI is allowed to suggest enabled discounts to customers."
+                                    : "AI discount suggestions are currently disabled globally."
+                                }
+                            </s-text>
+                        </s-stack>
+                        <s-switch
+                            checked={masterEnabled}
+                            onChange={handleMasterToggle}
+                        />
+                    </s-stack>
+                </s-box>
+            </s-card>
+
             <s-stack direction="inline" justifyContent="space-between" alignItems="center">
-                <s-text>Manage which discounts the AI can suggest to customers.</s-text>
+                <s-text>Manage which individual discounts the AI can suggest when the master trigger is on.</s-text>
                 <s-button icon="reset" onClick={handleSync} loading={fetcher.state === "submitting"}>Sync from Shopify</s-button>
             </s-stack>
             <s-card>
@@ -110,6 +149,7 @@ export default function Discount({ discounts: initialDiscounts }: { discounts: D
                                 <s-table-cell>
                                     <s-switch
                                         checked={discount.isSuggested}
+                                        disabled={!masterEnabled}
                                         onChange={() => handleToggle(discount.id, discount.isSuggested)}
                                     />
                                 </s-table-cell>
