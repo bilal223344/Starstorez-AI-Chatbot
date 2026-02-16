@@ -185,14 +185,31 @@ export async function processChatTurn(
     }
     if (isMergeOnly) return { success: true };
 
-    // B. SAVE USER MESSAGE TO FIREBASE
+    // B. CHECK HANDOFF STATUS (Is a human in control?)
+    const metaSnap = await rtdb.ref(metaPath).get();
+    const metadata = metaSnap.val() || {};
+
+    if (metadata.isHumanSupport) {
+      console.log(`[Orchestrator] Human support active for ${sessionId}. Skipping AI response generation.`);
+      
+      // Still B.1: SAVE USER MESSAGE TO FIREBASE (so merchant sees it)
+      await rtdb.ref(firebaseChatPath).push({
+        sender: "user",
+        text: userMessage,
+        timestamp: Date.now(),
+      });
+      
+      return { success: true, handoff: true };
+    }
+
+    // C. SAVE USER MESSAGE TO FIREBASE
     await rtdb.ref(firebaseChatPath).push({
       sender: "user",
       text: userMessage,
       timestamp: Date.now(),
     });
 
-    // C. SESSION MANAGEMENT (DB Layer)
+    // D. SESSION MANAGEMENT (DB Layer)
     const { session, customerId } = await getOrCreateSession(shop, email || "guest");
 
     // D. RUN AI MODEL

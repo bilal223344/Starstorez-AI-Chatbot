@@ -21,7 +21,7 @@ import {
   type Database,
 } from "firebase/database";
 
-import { Loader2, ShoppingBag, Sparkles } from "lucide-react";
+import { Loader2, ShoppingBag, Sparkles, Mail, Phone, MapPin } from "lucide-react";
 import "app/styles/inbox.css";
 import { ConversationSummaryModal } from "app/components/Widget/ConversationSummaryModal";
 // import { generateAIResponse } from "@/services/ai/ai.service";
@@ -89,6 +89,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     } catch (error) {
       console.error("Error generating reply:", error);
       return data({ reply: "", error: "Failed to generate reply" });
+    }
+  }
+
+  if (intent === "toggle_handoff") {
+    const sessionId = formData.get("sessionId") as string;
+    const isHumanSupport = formData.get("isHumanSupport") === "true";
+
+    if (!sessionId) return data({ success: false, error: "Missing sessionId" });
+
+    const safeShop = session.shop.replace(/\./g, "_");
+    try {
+      await rtdb.ref(`chats/${safeShop}/${sessionId}/metadata`).update({
+        isHumanSupport,
+      });
+      return data({ success: true });
+    } catch (error) {
+      console.error("Error toggling handoff:", error);
+      return data({ success: false, error: "Failed to update handoff status" });
     }
   }
 
@@ -279,6 +297,71 @@ const ProductCard = ({ product }: { product: ProductDetails }) => {
         <p className="product-card__price">${product.price}</p>
       </div>
 
+    </div>
+  );
+};
+
+const SupportToggle = ({ session }: { session: SessionListItem }) => {
+  const fetcher = useFetcher();
+  const isHuman = session.isHumanSupport;
+
+  const handleToggle = () => {
+    fetcher.submit(
+      { 
+        intent: "toggle_handoff", 
+        sessionId: session.sessionId, 
+        isHumanSupport: String(!isHuman) 
+      },
+      { method: "post" }
+    );
+  };
+
+  return (
+    <button 
+      className={`handoff-toggle ${isHuman ? "handoff-toggle--human" : "handoff-toggle--ai"}`}
+      onClick={handleToggle}
+      disabled={fetcher.state !== "idle"}
+    >
+      <span className="handoff-toggle__label">
+        {isHuman ? "Support: Manual" : "Support: AI"}
+      </span>
+      <div className="handoff-toggle__switch">
+        <div className="handoff-toggle__slider" />
+      </div>
+    </button>
+  );
+};
+
+const ModeSelector = ({ session }: { session: SessionListItem }) => {
+  const fetcher = useFetcher();
+  const isHuman = session.isHumanSupport;
+
+  const setMode = (mode: "ai" | "human") => {
+    if ((mode === "human") === isHuman) return;
+    fetcher.submit(
+      { 
+        intent: "toggle_handoff", 
+        sessionId: session.sessionId, 
+        isHumanSupport: String(mode === "human") 
+      },
+      { method: "post" }
+    );
+  };
+
+  return (
+    <div className="mode-selector">
+      <button 
+        className={`mode-btn mode-btn--ai ${!isHuman ? "mode-btn--active" : ""}`}
+        onClick={() => setMode("ai")}
+      >
+        <Sparkles size={14} /> AI
+      </button>
+      <button 
+        className={`mode-btn mode-btn--human ${isHuman ? "mode-btn--active" : ""}`}
+        onClick={() => setMode("human")}
+      >
+        <Mail size={14} /> Manual
+      </button>
     </div>
   );
 };
@@ -741,16 +824,12 @@ export default function Inbox() {
                 </h3>
                 <div className="inbox-chat__header-meta">
                   <span className={`inbox-status-dot ${selectedSession.isHumanSupport ? "inbox-status-dot--warning" : "inbox-status-dot--active"}`} />
-                  <span>{selectedSession.isHumanSupport ? "Waiting for agent" : "AI handling"}</span>
-                  <span className="inbox-chat__header-sep">·</span>
                   <span>{selectedSession.messageCount} messages</span>
                 </div>
               </div>
             </div>
             <div className="inbox-chat__header-actions">
-              {selectedSession.isHumanSupport && (
-                <span className="inbox-escalated-badge">⚡ Escalated</span>
-              )}
+              <SupportToggle session={selectedSession} />
               <button
                 className={`inbox-icon-btn ${showSummary ? "inbox-icon-btn--active" : ""}`}
                 onClick={handleLoadSummary}
@@ -862,25 +941,25 @@ export default function Inbox() {
           </div>
 
           {/* ── FOOTER ── */}
-          <div className="inbox-chat__footer" style={{ borderTop: "1px solid #e3e5e8", background: "#fff" }}>
+          <div className="inbox-chat__footer">
             {/* Toolbar */}
-            <div style={{ padding: "8px 24px 0", display: "flex", gap: "8px" }}>
+            <div className="chat-toolbar">
                  <button
                     onClick={handleProductPicker}
-                    style={{ background: "none", border: "none", cursor: "pointer", color: "#6b7280", padding: "4px", display: "flex", alignItems: "center", gap: "4px" }}
+                    className="chat-toolbar__btn"
                     title="Recommend Product"
                  >
                     <ShoppingBag size={18} />
-                    <span style={{ fontSize: "12px", fontWeight: 500 }}>Recommend</span>
+                    <span>Recommend</span>
                  </button>
                  <button
                     onClick={handleGenerateReply}
-                    style={{ background: "none", border: "none", cursor: "pointer", color: fetcher.state !== "idle" ? "#9333ea" : "#6b7280", padding: "4px", display: "flex", alignItems: "center", gap: "4px"  }}
+                    className={`chat-toolbar__btn chat-toolbar__btn--ai ${fetcher.state !== "idle" ? "loading" : ""}`}
                     title="Generate AI Reply"
                     disabled={fetcher.state !== "idle"}
                  >
                     <Sparkles size={18} className={fetcher.state !== "idle" ? "animate-pulse" : ""} />
-                    <span style={{ fontSize: "12px", fontWeight: 500 }}>Smart Reply</span>
+                    <span>Smart Reply</span>
                  </button>
             </div>
 
@@ -939,62 +1018,137 @@ export default function Inbox() {
 
       {/* ── DETAIL PANEL ── */}
       {showDetail && selectedSession && (
-        <div className="inbox-detail">
-          <div className="inbox-detail__header">
-            <h3>Customer Profile</h3>
-            <button
-              className="inbox-detail__close"
-              onClick={() => setShowDetail(false)}
-            >
-              ✕
-            </button>
-          </div>
+        <DetailPanel session={selectedSession} onClose={() => setShowDetail(false)}>
+          <ProfileIdentity session={selectedSession} />
+          
+          <DetailSection title="Key Metrics">
+            <MetricsGrid session={selectedSession} />
+          </DetailSection>
 
-          {/* Avatar Block */}
-          <div className="inbox-detail__identity">
-            <div
-              className={`inbox-detail__avatar ${selectedSession.email === "Guest" ? "session-card__avatar--guest" : "session-card__avatar--customer"}`}
-            >
-              {getInitial(selectedSession.email)}
-            </div>
-            <h4>
-              {selectedSession.email === "Guest"
-                ? "Guest User"
-                : selectedSession.email}
-            </h4>
-          </div>
+          <DetailSection title="Contact Details">
+            <ContactDetails session={selectedSession} />
+          </DetailSection>
 
-          {/* Metrics */}
-          <div className="inbox-detail__metrics">
-            <div className="inbox-detail__metric">
-              <span className="inbox-detail__metric-label">Messages</span>
-              <span className="inbox-detail__metric-value">{selectedSession.messageCount}</span>
-            </div>
-            <div className="inbox-detail__metric">
-              <span className="inbox-detail__metric-label">Status</span>
-              <span className={`inbox-detail__metric-value ${selectedSession.isHumanSupport ? "inbox-detail__metric-value--warning" : "inbox-detail__metric-value--success"}`}>
-                {selectedSession.isHumanSupport ? "Escalated" : "AI Active"}
-              </span>
-            </div>
-          </div>
+          <DetailSection title="Last Order">
+            <OrderHistory orderId="#1024" status="DELIVERED" date="Feb 14, 2026" amount="$145.00" />
+          </DetailSection>
 
-          <div className="inbox-detail__section">
-            <div className="inbox-detail__label">Session ID</div>
-            <div
-              className="inbox-detail__value inbox-detail__value--mono"
-            >
-              {selectedSession.sessionId}
-            </div>
-          </div>
-
-          <div className="inbox-detail__section">
-            <div className="inbox-detail__label">Last Activity</div>
-            <div className="inbox-detail__value">
-              {new Date(selectedSession.lastTimestamp).toLocaleString()}
-            </div>
-          </div>
-        </div>
+          <DetailSection title="Session Info">
+            <TechnicalInfo session={selectedSession} />
+          </DetailSection>
+        </DetailPanel>
       )}
     </div>
   );
 }
+
+// ── CUSTOMER PROFILE COMPONENTS ──
+
+const DetailPanel = ({ 
+  onClose, 
+  children 
+}: { 
+  onClose: () => void; 
+  children: React.ReactNode 
+}) => (
+  <div className="inbox-detail">
+    <div className="inbox-detail__header">
+      <h3>Customer Profile</h3>
+      <button className="inbox-detail__close" onClick={onClose}>✕</button>
+    </div>
+    <div className="inbox-detail__content">
+      {children}
+    </div>
+  </div>
+);
+
+const ProfileIdentity = ({ session }: { session: SessionListItem }) => {
+  const isGuest = session.email === "Guest";
+  const name = isGuest ? "Guest User" : session.email.split('@')[0];
+  
+  return (
+    <div className="inbox-detail__identity">
+      <div className="inbox-detail__avatar-wrapper">
+        <div className={`inbox-detail__avatar ${isGuest ? "session-card__avatar--guest" : "session-card__avatar--customer"}`}>
+          {session.email.charAt(0).toUpperCase()}
+        </div>
+      </div>
+      <h2 className="inbox-detail__name">{name}</h2>
+      <p className="inbox-detail__email">{session.email}</p>
+      <div className="inbox-detail__badges">
+        <span className="badge badge--vip">VIP</span>
+        <span className="badge badge--location">USA</span>
+      </div>
+    </div>
+  );
+};
+
+const DetailSection = ({ title, children }: { title: string; children: React.ReactNode }) => (
+  <div className="inbox-detail__section">
+    <h4 className="inbox-detail__section-title">{title}</h4>
+    {children}
+  </div>
+);
+
+const MetricsGrid = ({ session }: { session: SessionListItem }) => (
+  <div className="inbox-detail__metrics-grid">
+    <div className="metric-card">
+      <span className="metric-card__label">Messages</span>
+      <span className="metric-card__value">{session.messageCount}</span>
+    </div>
+    <div className="metric-card">
+      <span className="metric-card__label">Status</span>
+      <span className={`metric-card__value ${session.isHumanSupport ? "text-amber" : "text-teal"}`}>
+        {session.isHumanSupport ? "Handover" : "AI Active"}
+      </span>
+    </div>
+  </div>
+);
+
+const ContactDetails = ({ session }: { session: SessionListItem }) => (
+  <div className="contact-info">
+    <div className="contact-info__item">
+      <Mail size={14} className="icon" />
+      <span>{session.email}</span>
+    </div>
+    <div className="contact-info__item">
+      <Phone size={14} className="icon" />
+      <span>+1 (555) 012-3456</span>
+    </div>
+    <div className="contact-info__item">
+      <MapPin size={14} className="icon" />
+      <span>Los Angeles, CA</span>
+    </div>
+  </div>
+);
+
+const OrderHistory = ({ orderId, status, date, amount }: { orderId: string, status: string, date: string, amount: string }) => (
+  <div className="order-card">
+    <div className="order-card__header">
+      <span className="order-card__id">{orderId}</span>
+      <span className="order-card__status badge--success">{status}</span>
+    </div>
+    <div className="order-card__meta">{date} • {amount}</div>
+    <div className="order-card__images">
+      <div className="product-thumb"></div>
+      <div className="product-thumb"></div>
+      <span className="more-count">+1</span>
+    </div>
+  </div>
+);
+
+const TechnicalInfo = ({ session }: { session: SessionListItem }) => (
+  <div className="technical-info">
+    <div className="info-row">
+      <span>ID:</span>
+      <span className="mono">{session.sessionId.substring(0, 12)}...</span>
+    </div>
+    <div className="info-row">
+      <span>Recent:</span>
+      <span>{new Date(session.lastTimestamp).toLocaleTimeString()}</span>
+    </div>
+    <div style={{ marginTop: 16 }}>
+      <ModeSelector session={session} />
+    </div>
+  </div>
+);
