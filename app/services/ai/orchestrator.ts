@@ -398,6 +398,60 @@ export async function processChatTurn(
       text: "I encountered an internal error. Please try again.",
       timestamp: Date.now()
     });
-    return { success: false, error };
+  }
+}
+
+// =================================================================
+// 6. SUMMARIZATION
+// =================================================================
+export async function summarizeConversation(messages: { role: string; content: string }[]) {
+  try {
+    const model = vertexAI.getGenerativeModel({
+      model: "gemini-2.0-flash-001", // Using generic name for better reliability
+      generationConfig: {
+        responseMimeType: "application/json",
+      }
+    });
+
+    const conversationText = messages.map(m => `${m.role}: ${m.content}`).join("\n");
+
+    const prompt = `
+      Analyze the following conversation between a Customer and an AI Sales Assistant.
+      Provide a highly detailed and structured summary in JSON format with the following fields:
+      - customerName: Extract from context if possible, otherwise null.
+      - overview: A concise paragraph summarizing the customer's inquiry and the current status.
+      - intent: Short phrase describing user intent (e.g., "Product Inquiry", "Order Status").
+      - sentiment: "Positive", "Neutral", or "Negative".
+      - sentimentScore: A number from 0-100 indicating confidence in the sentiment.
+      - priority: "Low", "Medium", or "High" based on urgency or customer frustration.
+      - tags: Array of short strings (max 3) like ["Looking to buy", "Urgent"].
+      - keyQuotes: Array of 1-2 most significant direct statements from the customer.
+      - suggestedAction: A specific recommendation for the merchant (e.g., "Check inventory", "Follow up").
+      - resolutionStatus: "Escalated", "Requires Follow-up", or "Informational".
+      
+      Conversation:
+      ${conversationText}
+    `;
+
+    const result = await model.generateContent(prompt);
+    const response = result.response;
+    const text = response.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (!text) throw new Error("No summary generated");
+
+    return JSON.parse(text);
+  } catch (error) {
+    console.error("Error summarizing conversation:", error);
+    return {
+      overview: "Failed to generate summary.",
+      intent: "Error",
+      sentiment: "Neutral",
+      sentimentScore: 50,
+      priority: "Medium",
+      tags: ["Error"],
+      keyQuotes: [],
+      suggestedAction: "Check logs for details.",
+      resolutionStatus: "Informational"
+    };
   }
 }

@@ -23,6 +23,7 @@ import {
 
 import { Loader2, ShoppingBag, Sparkles } from "lucide-react";
 import "app/styles/inbox.css";
+import { ConversationSummaryModal } from "app/components/Widget/ConversationSummaryModal";
 // import { generateAIResponse } from "@/services/ai/ai.service";
 // import { AIMessage } from "~/types/chat.types";
 import { useAppBridge } from "@shopify/app-bridge-react";
@@ -265,37 +266,19 @@ function getClientFirebase(config: FirebaseConfig): { app: FirebaseApp; db: Data
   }
 }
 
-const ProductCard = ({ product, shop, onAsk }: { product: ProductDetails; shop: string; onAsk: (p: ProductDetails) => void }) => {
+const ProductCard = ({ product }: { product: ProductDetails }) => {
   if (!product) return <div className="product-card" style={{ height: 300, background: '#f3f4f6' }}></div>;
-  
-  const handle = product.handle || product.prodId.split("/").pop();
-  const productUrl = `https://${shop}/products/${handle}`;
 
   return (
     <div className="product-card">
       <div className="product-card__image">
-        <img src={product.image} alt={product.title} loading="lazy" />
+        <img src={product.image || "https://agrimart.in/uploads/vendor_banner_image/default.jpg"} alt={product.title} loading="lazy" />
       </div>
       <div className="product-card__info">
         <h4 className="product-card__title" title={product.title}>{product.title}</h4>
         <p className="product-card__price">${product.price}</p>
       </div>
-      <div className="product-card__actions">
-        <a 
-          href={productUrl}
-          target="_blank" 
-          rel="noreferrer"
-          className="product-card__btn product-card__btn--secondary"
-        >
-          View Details
-        </a>
-        <button 
-          onClick={() => onAsk(product)}
-          className="product-card__btn product-card__btn--primary"
-        >
-          Ask AI
-        </button>
-      </div>
+
     </div>
   );
 };
@@ -322,6 +305,11 @@ export default function Inbox() {
   const [hasOlderMessages, setHasOlderMessages] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [filterTab, setFilterTab] = useState<"all" | "human">("all");
+
+  // Summary State
+  const [showSummary, setShowSummary] = useState(false);
+  const [summaryData, setSummaryData] = useState(null);
+  const [loadingSummary, setLoadingSummary] = useState(false);
 
   // Cache for product details
   const [productDetails, setProductDetails] = useState<Record<string, ProductDetails>>({});
@@ -459,8 +447,12 @@ export default function Inbox() {
   }, [clientDb, selectedSessionId, messages, loadingOlder, safeShop]);
 
   // --- Batch Fetch Missing Product IDs ---
+  // Track which IDs we have already attempted to fetch (to prevent infinite retry loops)
+  const processedIdsToCheck = useRef<Set<string>>(new Set());
+
+  // --- Batch Fetch Missing Product IDs ---
   useEffect(() => {
-    // 1. Identify IDs needed
+    // 1. Identify IDs needed from all messages
     const allProductIds = new Set<string>();
     messages.forEach(msg => {
       if (msg.product_ids && Array.isArray(msg.product_ids)) {
@@ -468,13 +460,22 @@ export default function Inbox() {
       }
     });
 
-    // 2. Filter out already cached
-    const missingIds = Array.from(allProductIds).filter(id => !productDetails[id]);
+    // 2. Filter out:
+    //    a) Already cached in productDetails
+    //    b) Already attempted (in processedIdsToCheck)
+    const missingIds = Array.from(allProductIds).filter(id => 
+      !productDetails[id] && !processedIdsToCheck.current.has(id)
+    );
 
-    // 3. Fetch if needed (debounce slightly effectively by dependency array)
-    if (missingIds.length > 0 && productFetcher.state === "idle" && !productFetcher.data) {
+    // 3. Fetch if needed
+    if (missingIds.length > 0 && productFetcher.state === "idle") {
+      // Mark these as processed so we don't try again immediately if fetch fails or returns empty
+      missingIds.forEach(id => processedIdsToCheck.current.add(id));
+      
       console.log("Fetching missing products:", missingIds);
-      productFetcher.load(`/api/products?ids=${missingIds.join(",")}`);
+      // Use encodeURIComponent to ensure special characters (like / in GIDs) don't break the URL
+      const encodedIds = missingIds.map(id => encodeURIComponent(id)).join(",");
+      productFetcher.load(`/api/products?ids=${encodedIds}`);
     }
   }, [messages, productDetails, productFetcher.state, productFetcher]);
 
@@ -506,6 +507,11 @@ export default function Inbox() {
     // Reset pagination state when switching sessions
     // setLastMessageTimestamp(null); // This was for a different pagination approach
     setHasOlderMessages(true);
+    
+    // Reset summary state
+    setShowSummary(false);
+    setSummaryData(null);
+
     // Determine if mobile (based on window width or similar,
     // though simpler to just use CSS classes for visibility)
   };
@@ -535,16 +541,14 @@ export default function Inbox() {
   const handleProductPicker = async () => {
     const selected = await shopify.resourcePicker({ type: "product", multiple: true });
     if (selected) {
-      const ids = selected.map((p: any) => p.id); // "gid://shopify/Product/..."
+      const ids = selected.map((p: { id: string }) => p.id); // "gid://shopify/Product/..."
       
       // Just send the IDs, no text
       await handleSend("", ids);
     }
   };
 
-  const handleAskProduct = (product: ProductDetails) => {
-    handleSend(`Tell me more about ${product.title}`);
-  };
+
 
   const handleGenerateReply = () => {
     if (messages.length === 0) return;
@@ -554,6 +558,33 @@ export default function Inbox() {
         { intent: "generate_reply", messages: JSON.stringify(recentMessages) },
         { method: "post" }
     );
+  };
+
+  const handleLoadSummary = async () => {
+    if (!selectedSessionId) return;
+    
+    setShowSummary(true);
+    if (summaryData) return; // Already loaded
+
+    setLoadingSummary(true);
+    try {
+      const formData = new FormData();
+      formData.append("sessionId", selectedSessionId);
+      
+      const res = await fetch("/api/summary", {
+        method: "POST",
+        body: formData,
+      });
+      
+      const data = await res.json();
+      if (data.summary) {
+        setSummaryData(data.summary);
+      }
+    } catch (error) {
+      console.error("Failed to load summary:", error);
+    } finally {
+      setLoadingSummary(false);
+    }
   };
 
   // ── Group messages by date ──
@@ -721,6 +752,13 @@ export default function Inbox() {
                 <span className="inbox-escalated-badge">⚡ Escalated</span>
               )}
               <button
+                className={`inbox-icon-btn ${showSummary ? "inbox-icon-btn--active" : ""}`}
+                onClick={handleLoadSummary}
+                title="AI Summary"
+              >
+                <Sparkles size={18} />
+              </button>
+              <button
                 className={`inbox-icon-btn ${showDetail ? "inbox-icon-btn--active" : ""}`}
                 onClick={() => setShowDetail(!showDetail)}
                 title="Customer details"
@@ -735,6 +773,14 @@ export default function Inbox() {
           </div>
 
           {/* Messages */}
+          
+          <ConversationSummaryModal
+            isOpen={showSummary}
+            onClose={() => setShowSummary(false)}
+            summary={summaryData}
+            isLoading={loadingSummary}
+            customerName={selectedSession?.email}
+          />
           <div className="inbox-chat__messages" ref={scrollRef}>
             {/* Load More */}
             {hasOlderMessages && messages.length >= BATCH_SIZE && (
@@ -794,21 +840,19 @@ export default function Inbox() {
                         </div>
                         <div className="msg__bubble">
                           {msg.text && <p>{msg.text}</p>}
-
-                          {/* Render Product Cards if any */}
-                          {msg.product_ids && msg.product_ids.length > 0 && (
-                              <div className="product-carousel">
-                                  {msg.product_ids.map(id => (
-                                      <ProductCard 
-                                        key={id} 
-                                        product={productDetails[id]} 
-                                        shop={shop}
-                                        onAsk={handleAskProduct}
-                                      />
-                                  ))}
-                              </div>
-                          )}
                         </div>
+
+                        {/* Render Product Cards if any - MOVED OUTSIDE BUBBLE */}
+                        {msg.product_ids && msg.product_ids.length > 0 && (
+                            <div className="product-carousel">
+                                {msg.product_ids.map(id => (
+                                    <ProductCard 
+                                      key={id} 
+                                      product={productDetails[id]} 
+                                    />
+                                ))}
+                            </div>
+                        )}
                       </div>
                     </div>
                   ))}
