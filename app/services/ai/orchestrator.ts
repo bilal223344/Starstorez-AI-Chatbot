@@ -3,9 +3,8 @@ import {
   FunctionDeclarationSchemaType,
   Tool,
 } from "@google-cloud/vertexai";
-import { initializeApp, getApps, cert } from "firebase-admin/app";
-import { getDatabase } from "firebase-admin/database";
 import prisma from "app/db.server";
+import { rtdb } from "app/services/firebaseAdmin.server";
 
 import { searchPinecone } from "app/services/search/pinecone.service";
 import { getOrCreateSession, saveChatTurn } from "app/services/db/chat.db";
@@ -15,21 +14,11 @@ import { getOrCreateSession, saveChatTurn } from "app/services/db/chat.db";
 // =================================================================
 const LOCATION = "us-central1";
 
-// Initialize Firebase Admin (Server-Side)
 const serviceAccount = {
   projectId: process.env.FIREBASE_PROJECT_ID || "ai-chat-bot-425d2",
   clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-  // key must replace literal \n with actual newlines if coming from .env
   privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
 };
-
-if (!getApps().length) {
-  initializeApp({
-    credential: cert(serviceAccount),
-    databaseURL: process.env.FIREBASE_DATABASE_URL,
-  });
-}
-const rtdb = getDatabase();
 
 // Initialize Vertex AI
 const vertexAI = new VertexAI({
@@ -66,7 +55,14 @@ RULES FOR "recommend_products":
 
 GENERAL:
 - Keep answers strictly based on the provided tool data.
-- Do not hallucinate.`;
+- Do not hallucinate.
+
+*** IMPORTANT: PRODUCT CARD RENDERING ***
+- If you find products using 'recommend_products', do NOT list their names, prices, or details in your text response.
+- The user interface will automatically render a visual card for each product returned by the tool.
+- Instead, simply say: "Here are some recommendations based on your request:" or "I found these products for you:".
+- If the user did not ask a specific question, you can return a very brief response or even an empty string if permitted.
+- This ensures a clean chat experience without duplicate information.`;
 
 // =================================================================
 // 2. TOOLS DEFINITION (JSON Schema)
@@ -251,16 +247,14 @@ export async function processChatTurn(
               const searchRes = await searchPinecone(shop, args.search_query, args.min_price, args.max_price, args.sort);
               recommendedProducts = searchRes.matches.map(m => m.metadata);
 
+              // Inject instruction into the tool result itself
               toolResult = {
                 products: recommendedProducts.map((p: any) => ({
-                  id: p.product_id,
                   title: p.title,
                   price: p.price_val,
-                  // We pass basic info. The AI can ask for 'get_product_details' if it needs description.
-                  // Or we can pass it here if we want to be chatty immediately.
-                  // Let's pass description here too to save a round trip for "recommendation" mode.
-                  description: p.description?.slice(0, 200) + "..." // Truncate for token efficiency in list view
-                }))
+                  id: p.product_id
+                })),
+                system_note: "UI will render these products as cards. DO NOT list them in text. Keep response brief."
               };
               break;
             }

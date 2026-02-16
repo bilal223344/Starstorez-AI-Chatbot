@@ -1,29 +1,53 @@
-import { LoaderFunctionArgs } from "react-router";
-import prisma from "app/db.server";
+import { data, type LoaderFunctionArgs } from "react-router";
+import prisma from "../db.server";
+
+function corsHeaders() {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  };
+}
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-    const url = new URL(request.url);
-    const ids = url.searchParams.get("ids")?.split(",") || [];
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: corsHeaders() });
+  }
 
-    if (ids.length === 0) {
-        return Response.json([]);
-    }
+  const url = new URL(request.url);
+  const idsParam = url.searchParams.get("ids");
 
-    try {
-        const products = await prisma.product.findMany({
-            where: { prodId: { in: ids } },
-            select: {
-                prodId: true,
-                title: true,
-                price: true,
-                image: true,
-                stock: true
-            }
-        });
+  if (!idsParam) {
+    return data({ products: [] }, { headers: corsHeaders() });
+  }
 
-        return Response.json(products);
-    } catch (error) {
-        console.error("Product Fetch Error:", error);
-        return Response.json({ error: "Failed to fetch products" }, { status: 500 });
-    }
+  const ids = idsParam.split(",").filter(Boolean);
+
+  if (ids.length === 0) {
+    return data({ products: [] }, { headers: corsHeaders() });
+  }
+
+  try {
+    const products = await prisma.product.findMany({
+      where: {
+        prodId: {
+          in: ids,
+        },
+      },
+      select: {
+        prodId: true,
+        title: true,
+        price: true,
+        image: true,
+        handle: true,
+        description: true,
+        stock: true, // Added stock to selection as it is used in frontend
+      },
+    });
+
+    return data({ products }, { headers: corsHeaders() });
+  } catch (error) {
+    console.error("Error fetching products:", error);
+    return data({ products: [], error: "Failed to fetch products" }, { status: 500, headers: corsHeaders() });
+  }
 };

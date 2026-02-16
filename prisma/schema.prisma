@@ -82,7 +82,7 @@ model ChatSession {
   createdAt  DateTime  @default(now())
   shop       String
   Customer   Customer? @relation(fields: [customerId], references: [id])
-  Message    Message[]
+  messages   Message[]
 
   @@index([shop])
   @@index([customerId])

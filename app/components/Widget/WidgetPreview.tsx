@@ -369,8 +369,8 @@ export default function WidgetPreview({ settings }: WidgetPreviewProps) {
                                         <div style={{ display: "flex", gap: "12px", paddingLeft: "44px" }}>
                                             <div className="custom-scrollbar" style={{ display: "flex", overflowX: "auto", paddingBottom: "16px", marginLeft: "-8px", paddingLeft: "8px", maxWidth: "100%", gap: "12px" }}>
                                                 {[
-                                                    { name: "Abstract Art Print", price: "$45.00", img: "https://images.unsplash.com/photo-1579783902614-a3fb392796a5?auto=format&fit=crop&w=300&q=80", stock: 10, handle: "abstract-art-print" },
-                                                    { name: "Ceramic Vase", price: "$28.50", img: "https://images.unsplash.com/photo-1612196808214-b7e239e5f6b7?auto=format&fit=crop&w=300&q=80", stock: 0, handle: "ceramic-vase" }
+                                                    { name: "Ceramic Coffee Mug", price: "$45.00", img: "https://plus.unsplash.com/premium_photo-1681711651128-11bb40474ab6?q=80&w=880&auto=format&fit=crop", stock: 10, handle: "abstract-art-print" },
+                                                    { name: "Soda Can", price: "$28.50", img: "https://plus.unsplash.com/premium_photo-1681879210168-c1e327f9ab69?q=80&w=880&auto=format&fit=crop", stock: 0, handle: "ceramic-vase" }
                                                 ].map((item, idx) => (
                                                     <div key={idx} style={{
                                                         flexShrink: 0,
