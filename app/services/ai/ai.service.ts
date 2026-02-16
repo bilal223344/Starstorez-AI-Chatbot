@@ -51,6 +51,12 @@ export async function generateAIResponse(
     messages: AIMessage[],
     shop: string
 ) {
+    // 0. Guard against empty message list
+    if (!messages || messages.length === 0) {
+        console.warn("[ai.service] Empty message list passed to generateAIResponse");
+        return { role: "assistant", content: "I'm sorry, I don't have enough context to respond." };
+    }
+
     // 1. Fetch Dynamic Settings (System Prompt)
     const aiSettings = await prisma.aISettings.findUnique({ where: { shop } });
     const settingsData = (aiSettings?.settings || {}) as unknown as AISettingsState;
@@ -64,10 +70,12 @@ export async function generateAIResponse(
     });
 
     // Convert messages to Gemini history format
-    const history: Content[] = messages.slice(0, -1).map(m => {
+    const history: Content[] = messages.slice(0, -1)
+        .filter(m => (m.content && m.content.trim() !== "") || m.tool_calls || m.role === "tool")
+        .map(m => {
         if (m.role === "assistant") {
             const parts: Part[] = [];
-            if (m.content) parts.push({ text: m.content });
+            if (m.content && m.content.trim() !== "") parts.push({ text: m.content });
             if (m.tool_calls) {
                 m.tool_calls.forEach((tc) => {
                     parts.push({
@@ -78,6 +86,8 @@ export async function generateAIResponse(
                     });
                 });
             }
+            // Ensure we don't return an empty part array
+            if (parts.length === 0) parts.push({ text: "..." });
             return { role: "model", parts };
         } else if (m.role === "tool") {
             return {
@@ -85,16 +95,21 @@ export async function generateAIResponse(
                 parts: [{
                     functionResponse: {
                         name: "recommend_products",
-                        response: { content: m.content || "" }
+                        response: { content: m.content || "{}" }
                     }
                 }]
             };
         } else {
-            return { role: "user", parts: [{ text: m.content || "" }] };
+            return { role: "user", parts: [{ text: (m.content && m.content.trim() !== "") ? m.content : "..." }] };
         }
     });
 
     const lastMessage = messages[messages.length - 1];
+    
+    // Safety check for last message content
+    if (!lastMessage.content && lastMessage.role !== "tool") {
+        lastMessage.content = "...";
+    }
 
     // Handle if last message is a tool response
     let lastContent: string | (string | Part)[];

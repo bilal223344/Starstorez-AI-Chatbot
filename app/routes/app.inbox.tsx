@@ -71,6 +71,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     try {
       const rawMessages = JSON.parse(messagesJson) as FirebaseMessage[];
+      if (rawMessages.length === 0) return data({ reply: "" });
       // Convert to AIMessage format
       const aiMessages: AIMessage[] = rawMessages.map(m => ({
         role: m.sender === "user" ? "user" : "assistant",
