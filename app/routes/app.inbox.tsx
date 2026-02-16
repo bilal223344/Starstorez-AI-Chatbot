@@ -388,7 +388,7 @@ export default function Inbox() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [hasOlderMessages, setHasOlderMessages] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const [filterTab, setFilterTab] = useState<"all" | "human">("all");
+  const [filterTab, setFilterTab] = useState<"all" | "ai" | "human">("all");
 
   // Summary State
   const [showSummary, setShowSummary] = useState(false);
@@ -410,12 +410,24 @@ export default function Inbox() {
 
   const safeShop = useMemo(() => shop.replace(/\./g, "_"), [shop]);
 
+  // Session counts
+  const sessionCounts = useMemo(() => {
+    return {
+      all: sessions.length,
+      ai: sessions.filter((s: SessionListItem) => !s.isHumanSupport).length,
+      human: sessions.filter((s: SessionListItem) => s.isHumanSupport).length,
+    };
+  }, [sessions]);
+
   // Filtered sessions
   const filteredSessions = useMemo(() => {
     let list = sessions;
     if (filterTab === "human") {
       list = list.filter((s: SessionListItem) => s.isHumanSupport);
+    } else if (filterTab === "ai") {
+      list = list.filter((s: SessionListItem) => !s.isHumanSupport);
     }
+
     if (!searchQuery.trim()) return list;
     const q = searchQuery.toLowerCase();
     return list.filter(
@@ -727,13 +739,19 @@ export default function Inbox() {
               className={`inbox-filter-btn ${filterTab === "all" ? "inbox-filter-btn--active" : ""}`}
               onClick={() => setFilterTab("all")}
             >
-              All
+              All <span className="filter-count">{sessionCounts.all}</span>
+            </button>
+            <button
+              className={`inbox-filter-btn ${filterTab === "ai" ? "inbox-filter-btn--active" : ""}`}
+              onClick={() => setFilterTab("ai")}
+            >
+              AI <span className="filter-count">{sessionCounts.ai}</span>
             </button>
             <button
               className={`inbox-filter-btn ${filterTab === "human" ? "inbox-filter-btn--active" : ""}`}
               onClick={() => setFilterTab("human")}
             >
-              🙋 Needs Human
+              Manual <span className="filter-count">{sessionCounts.human}</span>
             </button>
           </div>
         </div>
@@ -789,12 +807,12 @@ export default function Inbox() {
                     <span className="session-card__msg-count">{s.messageCount} msgs</span>
                     {s.isHumanSupport && (
                       <span className="session-card__badge session-card__badge--human">
-                        🙋 Needs human
+                        Needs human
                       </span>
                     )}
                     {!s.isHumanSupport && (
                       <span className="session-card__badge session-card__badge--ai">
-                        🤖 AI Active
+                        AI Active
                       </span>
                     )}
                   </div>
