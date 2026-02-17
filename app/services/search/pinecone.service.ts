@@ -1,5 +1,6 @@
 import { generateEmbeddings } from "app/services/pineconeService";
 import { PineconeMatch } from "app/types/chat.types";
+import prisma from "app/db.server";
 
 const PINECONE_API_KEY = process.env.PINECONE_API_KEY || "";
 const INDEX_HOST = process.env.INDEX_HOST || "";
@@ -18,13 +19,123 @@ export async function searchPinecone(
     query: string,
     minPrice?: number,
     maxPrice?: number,
-    sort: "price_asc" | "price_desc" | "relevance" = "relevance", // Default to relevance
+    sort: "price_asc" | "price_desc" | "relevance" | "newest" | "best_selling" = "relevance", // Default to relevance
     boostAttribute?: string
 ): Promise<{ matches: PineconeMatch[]; debug: SearchDebug }> {
 
     const debug: SearchDebug = { query, pineconeMatches: 0, droppedCount: 0 };
 
     try {
+        // 0. HANDLE SPECIAL SORTS (Prisma Direct)
+        // For "newest" and "best_selling", vector search is often overkill or inaccurate for ordering.
+        // We use direct DB queries for these, optionally filtering by text if a query exists.
+
+        if (sort === "newest") {
+             const products = await prisma.product.findMany({
+                where: {
+                    shop,
+                    title: query ? { contains: query, mode: "insensitive" } : undefined,
+                    price: {
+                        gte: minPrice,
+                        lte: maxPrice
+                    }
+                },
+                orderBy: { createdAt: "desc" },
+                take: 10
+             });
+
+             const matches: PineconeMatch[] = products.map(p => ({
+                 id: p.prodId,
+                 score: 1.0, 
+                 metadata: {
+                     product_id: p.prodId,
+                     title: p.title,
+                     price: p.price,
+                     price_val: p.price,
+                     handle: p.handle || "",
+                     image: p.image || "",
+                     description: p.description || "",
+                     inventory_status: p.stock > 0 ? "in_stock" : "out_of_stock",
+                     product_type: "Product",
+                     vendor: "Store"
+                 }
+             }));
+             return { matches: matches.map(m => ({ ...m, score: 1.0 })), debug };
+        }
+
+        if (sort === "best_selling") {
+            try {
+                // Find top selling products by aggregating OrderItem
+                // Relation filtering in groupBy can be tricky, so we fetch Order IDs first
+                const orders = await prisma.order.findMany({
+                    where: { Customer: { shop } },
+                    select: { id: true }
+                });
+                
+                if (orders.length === 0) {
+                     return searchPinecone(shop, query, minPrice, maxPrice, "newest", boostAttribute);
+                }
+
+                const orderIds = orders.map(o => o.id);
+
+                const topItems = await prisma.orderItem.groupBy({
+                    by: ['productId'],
+                    _sum: { quantity: true },
+                    orderBy: { _sum: { quantity: 'desc' } },
+                    take: 10,
+                    where: {
+                        orderId: { in: orderIds }
+                    }
+                });
+                
+                // If no orders, fallback to newest
+                if (topItems.length === 0) {
+                     return searchPinecone(shop, query, minPrice, maxPrice, "newest", boostAttribute);
+                }
+
+                const productIds = topItems.map(item => item.productId);
+                
+                const products = await prisma.product.findMany({
+                    where: {
+                        shop,
+                        prodId: { in: productIds } 
+                    }
+                });
+
+                // Re-sort/Map (Handle undefined _sum safely)
+                const sortedProducts = products.sort((a, b) => {
+                    const aItem = topItems.find(i => i.productId === a.prodId);
+                    const bItem = topItems.find(i => i.productId === b.prodId);
+                    const aSales = aItem?._sum?.quantity ?? 0;
+                    const bSales = bItem?._sum?.quantity ?? 0;
+                    return bSales - aSales;
+                });
+
+                const matches: PineconeMatch[] = sortedProducts.map(p => ({
+                     id: p.prodId,
+                     score: 1.0, 
+                     metadata: {
+                         product_id: p.prodId,
+                         title: p.title,
+                         price: p.price,
+                         price_val: p.price,
+                         handle: p.handle || "",
+                         image: p.image || "",
+                         description: p.description || "",
+                         inventory_status: p.stock > 0 ? "in_stock" : "out_of_stock",
+                         product_type: "Product",
+                         vendor: "Store"
+                     }
+                 }));
+                 return { matches, debug };
+
+            } catch (e) {
+                console.error("Best selling sort error, falling back to Pinecone", e);
+                // Fallthrough to normal search
+            }
+        }
+
+
         // 1. Generate Embedding
         const embeddings = await generateEmbeddings([query]);
         if (!embeddings || embeddings.length === 0) return { matches: [], debug };
@@ -34,7 +145,7 @@ export async function searchPinecone(
 
         // 2. Build Pinecone Filter
         // We filter by type "PRODUCT" at the database level to reduce noise
-        const filter: any = {};
+        const filter: Record<string, any> = {};
 
         // Note: Pinecone metadata filtering for numbers can be tricky if not indexed correctly.
         // We generally filter strict ranges in memory if the index isn't set up for it, 

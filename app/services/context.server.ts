@@ -77,7 +77,28 @@ ${brandStr}
 ${policyStr}
 `;
 
-    } catch (error) {
+    } catch (error: unknown) {
+        // Handle specific "Access denied" for shopPolicies if scope is missing
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (errorMessage.includes("Access denied") && errorMessage.includes("shopPolicies")) {
+            console.warn("[Context] 'read_legal_policies' scope missing. Skipping policies.");
+            // Return context without policies
+             return `
+STORE PROFILE:
+- Name: Not specified (Scope missing)
+- Domain: Not specified
+- Location: Not specified
+- Website: Not specified
+- About: Not specified
+
+STORE POLICIES:
+- Shipping Policy: Not specified
+- Refund Policy: Not specified
+- Privacy Policy: Not specified
+- Terms of Service: Not specified
+`.trim();
+        }
+
         console.error(`[Context] Failed to fetch context for ${shop}:`, error);
         return "";
     }

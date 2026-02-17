@@ -28,9 +28,9 @@ model Session {
 }
 
 model Product {
-  id             Int              @id @default(autoincrement())
+  id             Int               @id @default(autoincrement())
   shop           String
-  prodId         String           @unique
+  prodId         String            @unique
   title          String
   description    String?
   tags           String[]
@@ -40,12 +40,13 @@ model Product {
   stock          Int
   handle         String?
   image          String?
-  isSynced       Boolean          @default(false)
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
+  isSynced       Boolean           @default(false)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
   MessageProduct MessageProduct[]
   faqs           ProductFAQ[]
   variants       ProductVariant[]
+  inCampaigns    CampaignProduct[]
 
   @@index([shop])
 }
@@ -141,6 +142,7 @@ model Campaign {
   shop            String
   name            String
   description     String?
+  responseMessage String?
   isActive        Boolean           @default(true)
   triggerKeywords String[]
   createdAt       DateTime          @default(now())
@@ -155,9 +157,11 @@ model CampaignProduct {
   campaignId String
   productId  String
   campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  Product    Product  @relation(fields: [productId], references: [prodId], onDelete: Cascade)
 
   @@unique([campaignId, productId])
   @@index([campaignId])
+  @@index([productId])
 }
 
 model Discount {
@@ -218,6 +222,8 @@ model ChatConfiguration {
   autoHandoffEnabled         Boolean  @default(true)
   useKeywordResponses        Boolean  @default(true)
   discountSuggestionsEnabled Boolean  @default(true)
+  faqEnabled                 Boolean  @default(true)
+  campaignsEnabled           Boolean  @default(true)
   maxTokensPerResponse       Int      @default(500)
   maxConcurrentRequests      Int      @default(5)
   rateLimitPerMinute         Int      @default(60)
