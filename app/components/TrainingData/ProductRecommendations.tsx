@@ -42,8 +42,7 @@ export default function ProductRecommendations({ campaigns: initialCampaigns, pr
     const [isEditing, setIsEditing] = useState(false);
 
     // We store selected PROD_IDs (strings), not internal IDs
-    const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
-    const [productSearchQuery, setProductSearchQuery] = useState("");
+    // Removed selectedProductIds and productSearchQuery as we now use Shopify Resource Picker
 
     // Sync props to state
     useEffect(() => {
@@ -51,9 +50,16 @@ export default function ProductRecommendations({ campaigns: initialCampaigns, pr
         const products = initialProducts || [];
 
         // Map raw campaigns to include full product details in _products
+        // Robust mapping to handle both full GIDs and older numeric IDs
         const augmentedCampaigns = rawCampaigns.map(c => ({
             ...c,
-            _products: c.products.map(cp => products.find(p => p.prodId === cp.productId)).filter(Boolean) as Product[]
+            _products: c.products.map(cp => {
+                const cpId = cp.productId;
+                return products.find(p => {
+                    const pId = p.prodId;
+                    return pId === cpId || pId.endsWith(`/${cpId}`) || cpId.endsWith(`/${pId}`);
+                });
+            }).filter(Boolean) as Product[]
         }));
 
         setCampaigns(augmentedCampaigns);
@@ -69,9 +75,6 @@ export default function ProductRecommendations({ campaigns: initialCampaigns, pr
         }
     }, [fetcher.state, fetcher.data]);
 
-    const filteredProductsForModal = allProducts.filter(p =>
-        !productSearchQuery || p.title.toLowerCase().includes(productSearchQuery.toLowerCase())
-    );
 
     const handleCreateNew = () => {
         setCurrentCampaign({
@@ -118,20 +121,44 @@ export default function ProductRecommendations({ campaigns: initialCampaigns, pr
         fetcher.submit({ intent: "toggleCampaignStatus", id, isActive: !currentStatus }, { method: "post" });
     };
 
-    const handleAddProducts = () => {
-        const existingIds = new Set(currentCampaign._products?.map(p => p.prodId) || []);
-        setSelectedProductIds(existingIds);
-        setProductSearchQuery("");
+    const handleAddProducts = async () => {
+        // Pre-select existing products - safely handle IDs that might already be GIDs
+        const selectionIds = currentCampaign._products?.map(p => ({
+            id: p.prodId.startsWith("gid://") ? p.prodId : `gid://shopify/Product/${p.prodId}`
+        })) || [];
 
-    };
+        try {
+            const selected = await window.shopify.resourcePicker({
+                type: "product",
+                multiple: true,
+                action: "select",
+                selectionIds
+            });
 
-    const confirmAddProducts = () => {
-        const selected = allProducts.filter(p => selectedProductIds.has(p.prodId));
-        setCurrentCampaign(prev => ({
-            ...prev,
-            _products: selected
-        }));
+            if (selected) {
+                // Map selected items to our local Product interface
+                // If the product exists in allProducts, use that (to get the numeric ID)
+                // Otherwise, create a temporary Product object from the picker data
+                const newProducts = selected.map((p) => {
+                    const existing = allProducts.find(ap => ap.prodId === p.id || ap.prodId.endsWith(`/${p.id}`) || p.id.endsWith(`/${ap.prodId}`));
+                    if (existing) return existing;
 
+                    return {
+                        id: 0, // Temporary ID for new products
+                        prodId: p.id,
+                        title: p.title,
+                        image: p.images?.[0]?.originalSrc
+                    } as Product;
+                });
+                
+                setCurrentCampaign(prev => ({
+                    ...prev,
+                    _products: newProducts
+                }));
+            }
+        } catch (error) {
+            console.error("Resource Picker Error:", error);
+        }
     };
 
     const handleRemoveProduct = (prodId: string) => {
@@ -147,7 +174,7 @@ export default function ProductRecommendations({ campaigns: initialCampaigns, pr
         const productIds = currentCampaign._products?.map(p => p.prodId) || [];
 
         const data: Record<string, string> = {
-            intent: "saveCampaign",
+            actionType: currentCampaign.id ? "update_campaign" : "create_campaign",
             name: currentCampaign.name,
             description: currentCampaign.description || "",
             isActive: currentCampaign.isActive ? "true" : "false",
@@ -156,7 +183,7 @@ export default function ProductRecommendations({ campaigns: initialCampaigns, pr
         };
 
         if (currentCampaign.id) {
-            data.id = currentCampaign.id;
+            data.campaignId = currentCampaign.id;
         }
 
         fetcher.submit(data, { method: "post" });
@@ -165,10 +192,10 @@ export default function ProductRecommendations({ campaigns: initialCampaigns, pr
         return (
             <>
                 <s-stack gap="base">
-                    <s-stack direction="inline" justifyContent="space-between" alignItems="center" gap="base">
-                        <s-stack direction="inline" alignItems="center" gap="base">
+                    <s-grid  gridTemplateColumns="1fr auto" justifyContent="space-between" alignItems="center" gap="large-100">
+                        <s-grid gridTemplateColumns="auto 1fr" alignItems="center" gap="base">
                             <s-button variant="tertiary" icon="arrow-left" onClick={() => setIsEditing(false)} />
-                            <s-grid gridTemplateColumns="1fr" gap="small-200">
+                            <s-grid gridTemplateColumns="auto" gap="small-200">
                                 <s-text-field
                                     value={currentCampaign.name}
                                     onInput={(e: CallbackEvent<"s-text-field">) => setCurrentCampaign({ ...currentCampaign, name: e.currentTarget.value })}
@@ -183,7 +210,7 @@ export default function ProductRecommendations({ campaigns: initialCampaigns, pr
                                     disabled={SYSTEM_CAMPAIGNS.includes(currentCampaign.name || "")}
                                 />
                             </s-grid>
-                        </s-stack>
+                        </s-grid>
                         <s-stack direction="inline" gap="base" alignItems="center">
                             {!SYSTEM_CAMPAIGNS.includes(currentCampaign.name || "") && (
                                 <s-switch
@@ -197,12 +224,12 @@ export default function ProductRecommendations({ campaigns: initialCampaigns, pr
                             )}
                             <s-button variant="primary" icon="save" onClick={handleSave} loading={fetcher.state !== "idle"}>Save Changes</s-button>
                         </s-stack>
-                    </s-stack>
+                    </s-grid>
 
                     <s-grid gridTemplateColumns="3fr 2fr" gap="base">
                         <s-stack blockSize="200px" border="base" borderRadius="base" overflow="hidden">
                             <div style={{ background: "white" }}>
-                                <s-stack gap="base" padding="base" >
+                                <s-grid gap="base" gridTemplateColumns="auto" inlineSize="100%" padding="base" >
                                     <s-stack direction="inline" alignItems="center" gap="small-200">
                                         <div style={{ width: "40px", height: "40px", backgroundColor: "#FFE52A22", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "12px", boxShadow: "rgb(255, 255, 255, 0.25) 1px 1px 3px 0px inset, rgba(255, 255, 255, 0.2) -1px -1px 3px 1px inset" }}>
                                             <Crown size={20} color="#eed309ff" />
@@ -220,7 +247,7 @@ export default function ProductRecommendations({ campaigns: initialCampaigns, pr
                                             </s-box>
                                         </s-stack>
                                     ) : (
-                                        <>
+                                        <s-stack>
                                             <s-text-field
                                                 label="Trigger Keywords"
                                                 details="When a customer message contains these words, this recommendation will be triggered. Separate by comma."
@@ -235,9 +262,9 @@ export default function ProductRecommendations({ campaigns: initialCampaigns, pr
                                             <s-stack direction="inline" gap="base">
                                                 {currentCampaign.triggerKeywords?.map((kw, i) => kw && <s-badge key={i}>{kw}</s-badge>)}
                                             </s-stack>
-                                        </>
+                                        </s-stack>
                                     )}
-                                </s-stack>
+                                </s-grid>
                             </div>
                         </s-stack>
 
@@ -245,7 +272,7 @@ export default function ProductRecommendations({ campaigns: initialCampaigns, pr
                             <div style={{ background: "white" }}>
                                 <s-stack direction="inline" padding="base" justifyContent="space-between" alignItems="center" gap="base">
                                     <s-heading>Selected Products ({currentCampaign._products?.length || 0})</s-heading>
-                                    <s-button icon="plus" onClick={handleAddProducts} commandFor="product-selection-modal" command="--show">Add Products</s-button>
+                                    <s-button icon="plus" onClick={handleAddProducts}>Add Products</s-button>
                                 </s-stack>
                             </div>
                             <s-stack padding="base" gap="base">
@@ -264,44 +291,6 @@ export default function ProductRecommendations({ campaigns: initialCampaigns, pr
                 </s-stack>
 
 
-                <s-modal
-                    id="product-selection-modal"
-                    heading="Select Products"
-                >
-                    <s-stack gap="base" padding="base">
-                        <s-search-field
-                            placeholder="Search products..."
-                            value={productSearchQuery}
-                            onInput={(e: CallbackEvent<"s-search-field">) => setProductSearchQuery(e.currentTarget.value)}
-                        />
-                        <div style={{ maxHeight: "300px", overflowY: "auto" }}>
-                            <s-grid gridTemplateColumns="1fr" gap="small">
-                                {filteredProductsForModal.map(p => (
-                                    <s-stack key={p.prodId} direction="inline" gap="base" alignItems="center" padding="small" border="base" borderRadius="base">
-                                        <s-checkbox
-                                            checked={selectedProductIds.has(p.prodId)}
-                                            onChange={() => {
-                                                const newSet = new Set(selectedProductIds);
-                                                if (newSet.has(p.prodId)) {
-                                                    newSet.delete(p.prodId);
-                                                } else {
-                                                    newSet.add(p.prodId);
-                                                }
-                                                setSelectedProductIds(newSet);
-                                            }}
-                                        />
-                                        {p.image && <s-thumbnail src={p.image} alt={p.title} size="small" />}
-                                        <s-text>{p.title}</s-text>
-                                    </s-stack>
-                                ))}
-                            </s-grid>
-                        </div>
-                        <s-stack direction="inline" justifyContent="end" gap="base">
-                            <s-button commandFor="product-selection-modal" command="--hide">Cancel</s-button>
-                            <s-button variant="primary" onClick={confirmAddProducts} commandFor="product-selection-modal" command="--hide">Done</s-button>
-                        </s-stack>
-                    </s-stack>
-                </s-modal>
             </>
         );
     }

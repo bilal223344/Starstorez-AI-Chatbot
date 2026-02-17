@@ -358,7 +358,8 @@ export class LangChainService {
             const triggers = camp.triggerKeywords;
             const match = matchesCampaignKeywords(userMessage, camp.name, triggers);
             
-            if (match && camp.responseMessage) {
+            if (match) {
+                console.log(`[LangChain] Direct Campaign Match: ${camp.name}`);
                 // Fetch campaign products
                 const campaignProducts = camp.products.map(cp => ({
                     id: cp.Product.prodId,
@@ -369,7 +370,8 @@ export class LangChainService {
                     score: 1.0
                 }));
 
-                return { text: camp.responseMessage, recommendedProducts: campaignProducts };
+                const responseText = camp.responseMessage || `I've found some products for you in our ${camp.name} collection:`;
+                return { text: responseText, recommendedProducts: campaignProducts };
             }
         }
     }

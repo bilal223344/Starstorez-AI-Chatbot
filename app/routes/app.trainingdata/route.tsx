@@ -8,6 +8,7 @@ import ProductRecommendations from "app/components/TrainingData/ProductRecommend
 import Profile from "app/components/TrainingData/Profile";
 import { Database } from "lucide-react";
 import FAQs from "app/components/TrainingData/FAQs";
+import { syncProductById } from "app/services/productService";
 
 // --- LOADER ---
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -247,6 +248,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             const productIdsRaw = formData.get("productIds");
             const productIds = productIdsRaw ? Array.from(new Set(JSON.parse(productIdsRaw as string))) as string[] : [];
 
+            // Ensure products exist in our DB before linking
+            for (const pid of productIds) {
+                const productExists = await prisma.product.findUnique({ where: { prodId: pid } });
+                if (!productExists) {
+                    await syncProductById(shop, session.accessToken!, pid);
+                }
+            }
+
             await prisma.campaign.create({
                 data: {
                     shop,
@@ -273,6 +282,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             const triggers = triggersRaw ? JSON.parse(triggersRaw as string) : [];
             const productIdsRaw = formData.get("productIds");
             const productIds = productIdsRaw ? Array.from(new Set(JSON.parse(productIdsRaw as string))) as string[] : [];
+
+            // Ensure products exist in our DB before linking
+            for (const pid of productIds) {
+                const productExists = await prisma.product.findUnique({ where: { prodId: pid } });
+                if (!productExists) {
+                    await syncProductById(shop, session.accessToken!, pid);
+                }
+            }
 
             // Transactional update: update details and replacing products
             await prisma.$transaction([
