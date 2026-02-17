@@ -3,11 +3,21 @@ import { unauthenticated } from "app/shopify.server";
 
 
 
+const contextCache = new Map<string, { data: string; timestamp: number }>();
+const CACHE_TTL = 1000 * 60 * 60; // 1 hour
+
 /**
  * Fetches the store's context (policies, brand info) from Shopify to power the AI.
  * This ensures the AI knows about the specific store it is representing.
  */
 export async function fetchStoreContext(shop: string): Promise<string> {
+    const now = Date.now();
+    const cached = contextCache.get(shop);
+    if (cached && (now - cached.timestamp < CACHE_TTL)) {
+        console.log(`[Context] Using cached context for ${shop}`);
+        return cached.data;
+    }
+
     try {
         // Use unauthenticated.admin to access the Admin API with the offline session
         const { admin } = await unauthenticated.admin(shop);
@@ -71,11 +81,14 @@ STORE POLICIES:
 `.trim();
 
         // Combine into a single system instruction suffix
-        return `
+        const context = `
 ${brandStr}
 
 ${policyStr}
 `;
+
+        contextCache.set(shop, { data: context, timestamp: now });
+        return context;
 
     } catch (error: unknown) {
         // Handle specific "Access denied" for shopPolicies if scope is missing
