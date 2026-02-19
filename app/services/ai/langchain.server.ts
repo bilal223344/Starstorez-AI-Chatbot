@@ -294,7 +294,7 @@ export class LangChainService {
   // MAIN GENERATION
   // ============================================================================
 
-  async generateResponse(
+  private async getChatContext(
     sessionId: string,
     userMessage: string,
     history: { role: string; content: string }[] = []
@@ -321,14 +321,14 @@ export class LangChainService {
     };
 
     if (!config.aiEnabled) {
-        return { text: "AI Support is currently disabled.", recommendedProducts: [] };
+        throw new Error("AI Support is currently disabled.");
     }
 
     // 1.1 Fetch Merchant Specific AI Settings
     const aiSettingsRecord = await prisma.aISettings.findUnique({
       where: { shop: this.shop }
     });
-    const aiSettings = (aiSettingsRecord?.settings as unknown as import("../../routes/app.personality").AISettingsState) || {} as import("../../routes/app.personality").AISettingsState;
+    const aiSettings = (aiSettingsRecord?.settings as any) || {};
 
     const assistantName = aiSettings.storeDetails?.about ? `${aiSettings.storeDetails.about} Assistant` : "Helpful Store Assistant";
     const persona = aiSettings.responseTone?.customInstructions || "Expert sales associate";
@@ -336,9 +336,9 @@ export class LangChainService {
     const responseTone = aiSettings.responseTone?.selectedTone?.join(", ") || "Helpful, Professional";
     const primaryLanguage = aiSettings.languageSettings?.primaryLanguage || "English";
 
-    // 2. Check CAMPAIGNS (Trigger Keywords) - Inject into LLM instead of bypassing
+    // 2. Check CAMPAIGNS (Trigger Keywords)
     let campaignContext = "";
-    let recommendedProducts: Array<{ id: string, title?: string, price?: number, handle?: string, image?: string, score?: number }> = [];
+    let recommendedProducts: any[] = [];
 
     if (config.campaignsEnabled) {
         const campaigns = await prisma.campaign.findMany({
@@ -349,9 +349,6 @@ export class LangChainService {
         for (const camp of campaigns) {
             const triggers = camp.triggerKeywords;
             if (matchesCampaignKeywords(userMessage, camp.name, triggers)) {
-                console.log(`[LangChain] Campaign Keywords Matched: ${camp.name}`);
-                
-                // Pre-populate products
                 const campaignProducts = camp.products.map(cp => ({
                     id: cp.Product.prodId,
                     title: cp.Product.title,
@@ -361,21 +358,18 @@ export class LangChainService {
                     score: 1.0
                 }));
                 recommendedProducts = [...recommendedProducts, ...campaignProducts];
-
-                // Prepare context for LLM
                 campaignContext += `\n[SYSTEM ALERT: USER MATCHED CAMPAIGN "${camp.name}"]\n`;
                 if (camp.responseMessage) {
-                    campaignContext += `The merchant prefers this general message for this campaign: "${camp.responseMessage}"\n`;
+                    campaignContext += `The merchant prefers this message for this campaign: "${camp.responseMessage}"\n`;
                 }
                 campaignContext += `Associated Products: ${campaignProducts.map(p => p.title).join(", ")}\n`;
-                campaignContext += `INSTRUCTION: Acknowledge these products naturally in your response. Do NOT use the tool "recommend_products" again for this specific intent as we have already found the products.`;
+                campaignContext += `INSTRUCTION: Acknowledge these products naturally. Do NOT use tool "recommend_products" again for this specific intent.`;
             }
         }
     }
 
     // 3. Prepare Tools
     const tools = await this.createTools(config, sessionId);
-    const modelWithTools = this.model.bindTools(tools);
 
     // 4. Prepare Context
     const storeContext = await fetchStoreContext(this.shop);
@@ -402,17 +396,9 @@ export class LangChainService {
 
       IMPORTANT:
       - You are ${assistantName}.
-      - **Persona Enforcement**: Embody the persona of "${persona}" in every interaction. If the persona is "Expert sales associate", be knowledgeable and professional. If it's "Friendly neighbor", be warm and casual.
-      - **Tone Enforcement**: Strictly maintain a "${responseTone}" tone. Ensure your word choice, sentence structure, and overall style consistently reflect these qualities. Do NOT slip into robotic or overly generic AI patterns.
-      - **Authenticity**: Avoid repetitive filler phrases. Each response should feel uniquely crafted for this customer and this store.
-      - Respond ONLY in ${primaryLanguage} unless the user switches language, then adapt naturally but stay helpful.
-      - ${customInstructions ? `Follow these specific instructions: ${customInstructions}` : ""}
-      - Use the available tools to answer questions.
-      - If you find products, listing them in the response text is optional but sending the data is crucial.
+      -Persona: ${persona}. Tone: ${responseTone}. Language: ${primaryLanguage}.
+      - Use available tools. If products are found, mention them naturally.
       - Keep responses concise and friendly.
-      - Do NOT recommend products unless the user explicitly asks for them or it's highly relevant.
-      - If you don't know the answer based on the tools and context, politely say so.
-      - **Greetings & Small Talk**: If the user says "Hi", "Hello", or "How are you", respond warmly as ${assistantName} before moving to any sales assistance.
     `;
 
     // 5. Build Message History
@@ -422,125 +408,120 @@ export class LangChainService {
         new HumanMessage(userMessage)
     ];
 
-    console.log(`[LangChain] Invoking model with ${messages.length} messages. User Query: "${userMessage}"`);
+    return { messages, tools, recommendedProducts, config };
+  }
 
-    // 6. Invoke Model
-    // We implement a simple ReAct loop (invoke -> check tool calls -> invoke with results)
+  async generateResponse(
+    sessionId: string,
+    userMessage: string,
+    history: { role: string; content: string }[] = []
+  ) {
+    const { messages, tools, recommendedProducts: campaignProducts } = await this.getChatContext(sessionId, userMessage, history);
+    let recommendedProducts = [...campaignProducts];
+    const modelWithTools = this.model.bindTools(tools);
+
     let finalResponse: any;
     try {
         finalResponse = await modelWithTools.invoke(messages);
-        console.log(`[LangChain] Model response received. Content type: ${typeof finalResponse.content}, Tool calls: ${finalResponse.tool_calls?.length || 0}`);
     } catch (err: any) {
-        // Handle a known LangChain/Gemini bug where empty responses cause a TypeError inside ChatVertexAI.invoke
-        if (err instanceof TypeError && (err.message.includes("reading 'message'") || err.message.includes("reading '0'"))) {
-            console.warn("[LangChain] Caught internal TypeError in invoke(). Likely empty response or content filtering. Attempting fallback...");
-            
-            // Fallback: try to get a response even if it's empty, or return a polite error message
-            // We use the raw model if binding failed us
-            try {
-                const fallbackResult = await this.model.generate([messages], { tools });
-                if (fallbackResult.generations[0] && fallbackResult.generations[0].length > 0) {
-                    finalResponse = (fallbackResult.generations[0][0] as any).message;
-                    console.log("[LangChain] Fallback generation succeeded.");
-                } else {
-                    console.warn("[LangChain] Fallback also returned no candidates.", fallbackResult.llmOutput);
-                    finalResponse = new AIMessage("I'm sorry, I'm having a little trouble understanding that request. Could you please try asking one thing at a time?");
-                }
-            } catch (fallbackErr) {
-                console.error("[LangChain] Fallback generation failed:", fallbackErr);
-                finalResponse = new AIMessage("I'm sorry, something went wrong on my end. Please try again in a moment.");
-            }
-        } else {
-            console.error("[LangChain] First Invoke Error:", err);
-            if (err.response) console.error("[LangChain] Response data:", err.response.data);
-            throw err;
-        }
+        // Fallback for Gemini invoke errors
+        console.warn("[LangChain] First Invoke Error:", err.message);
+        finalResponse = new AIMessage("I'm sorry, I'm having a little trouble. How else can I help?");
     }
     
-    if (!finalResponse || (finalResponse.content === "" && (!finalResponse.tool_calls || finalResponse.tool_calls.length === 0))) {
-        console.warn("[LangChain] Model response is virtually empty. Potential filtering issue.");
-    }
-    // recommendedProducts is already pre-populated if a campaign was matched
-
-    // Handle Tool Calls (Single turn for now, or loop if needed)
+    // Handle Tool Calls turn if present
     if (finalResponse.tool_calls && finalResponse.tool_calls.length > 0) {
         const toolMessages: ToolMessage[] = [];
-
         for (const toolCall of finalResponse.tool_calls) {
             const tool = tools.find(t => t.name === toolCall.name);
             if (tool) {
-                console.log(`[LangChain] Calling tool: ${toolCall.name}`);
                 const result = await tool.func(toolCall.args);
-                
-                // Capture products for side-effect (saving to DB/Frontend)
                 if (toolCall.name === "recommend_products") {
                     try {
                         const parsed = JSON.parse(result);
                         if (Array.isArray(parsed)) {
-                            // Ensure flat structure regardless of source (Pinecone or Campaign)
-                            recommendedProducts = parsed.map((p: { 
-                                id: string; 
-                                metadata?: { 
-                                    product_id?: string; 
-                                    title?: string; 
-                                    price?: string | number; 
-                                    handle?: string; 
-                                    image?: string; 
-                                };
-                                score?: number;
-                                title?: string;
-                                price?: string | number;
-                                handle?: string;
-                                image?: string;
-                            }) => {
-                                if (p.metadata) {
-                                    return {
-                                        id: (p.id || p.metadata.product_id) as string,
-                                        title: p.metadata.title as string,
-                                        price: typeof p.metadata.price === 'string' ? parseFloat(p.metadata.price) : p.metadata.price as number,
-                                        handle: p.metadata.handle as string,
-                                        image: p.metadata.image as string,
-                                        score: p.score || 0
-                                    };
-                                }
-                                return {
-                                    id: p.id,
-                                    title: p.title,
-                                    price: typeof p.price === 'string' ? parseFloat(p.price) : p.price as number,
-                                    handle: p.handle,
-                                    image: p.image,
-                                    score: p.score || 0
-                                };
-                            });
+                            recommendedProducts = [...recommendedProducts, ...parsed.map((p: any) => ({
+                                id: p.id || p.metadata?.product_id,
+                                title: p.title || p.metadata?.title,
+                                price: p.price || p.metadata?.price,
+                                handle: p.handle || p.metadata?.handle,
+                                image: p.image || p.metadata?.image,
+                                score: p.score || 0
+                            }))];
                         }
-                    } catch (e) {
-                         console.error("Error parsing product recommendations", e);
-                    }
+                    } catch (e) {}
                 }
-
-                toolMessages.push(new ToolMessage({
-                    tool_call_id: toolCall.id!,
-                    content: result,
-                    name: toolCall.name
-                }));
+                toolMessages.push(new ToolMessage({ tool_call_id: toolCall.id!, content: result, name: toolCall.name }));
             }
         }
-
-        // Add tool results to history and call model again
-        // Note: We need to append the refined AIMessage (with tool_calls) AND the ToolMessages
-        const followupResponse = await modelWithTools.invoke([
-            ...messages,
-            finalResponse,
-            ...toolMessages
-        ]);
-
-        finalResponse = followupResponse;
+        finalResponse = await modelWithTools.invoke([...messages, finalResponse, ...toolMessages]);
     }
 
-    // Return format expected by Orchestrator (or replace Orchestrator's return)
     return {
         text: typeof finalResponse.content === "string" ? finalResponse.content : JSON.stringify(finalResponse.content),
         recommendedProducts
     };
+  }
+
+  async *generateStreamingResponse(
+    sessionId: string,
+    userMessage: string,
+    history: { role: string; content: string }[] = []
+  ): AsyncGenerator<{ type: "text" | "metadata"; content: any }> {
+    let context;
+    try {
+        context = await this.getChatContext(sessionId, userMessage, history);
+    } catch (err: any) {
+        yield { type: "text", content: err.message };
+        return;
+    }
+    const { messages, tools, recommendedProducts: campaignProducts } = context;
+    let recommendedProducts = [...campaignProducts];
+    const modelWithTools = this.model.bindTools(tools);
+
+    let finalResponse = await modelWithTools.invoke(messages);
+
+    if (finalResponse.tool_calls && finalResponse.tool_calls.length > 0) {
+        const toolMessages: ToolMessage[] = [];
+        for (const toolCall of finalResponse.tool_calls) {
+            const tool = tools.find(t => t.name === toolCall.name);
+            if (tool) {
+                const result = await tool.func(toolCall.args);
+                if (toolCall.name === "recommend_products") {
+                    try {
+                        const parsed = JSON.parse(result);
+                        if (Array.isArray(parsed)) {
+                            recommendedProducts = [...recommendedProducts, ...parsed.map((p: any) => ({
+                                id: p.id || p.metadata?.product_id,
+                                title: p.title || p.metadata?.title,
+                                price: p.price || p.metadata?.price,
+                                handle: p.handle || p.metadata?.handle,
+                                image: p.image || p.metadata?.image,
+                                score: p.score || 0
+                            }))];
+                        }
+                    } catch (e) {}
+                }
+                toolMessages.push(new ToolMessage({ tool_call_id: toolCall.id!, content: result, name: toolCall.name }));
+            }
+        }
+        
+        const stream = await modelWithTools.stream([...messages, finalResponse, ...toolMessages]);
+        for await (const chunk of stream) {
+            if (chunk.content) yield { type: "text", content: chunk.content };
+        }
+    } else {
+        if (typeof finalResponse.content === "string") {
+            const words = finalResponse.content.split(" ");
+            for (const word of words) {
+                yield { type: "text", content: word + " " };
+                await new Promise(r => setTimeout(r, 10)); // Natural feel
+            }
+        } else {
+            yield { type: "text", content: JSON.stringify(finalResponse.content) };
+        }
+    }
+
+    yield { type: "metadata", content: { recommendedProducts } };
   }
 }

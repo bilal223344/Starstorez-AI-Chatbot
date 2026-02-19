@@ -26,19 +26,38 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     try {
-        // 1. Get ALL fields, including previousSessionId
         const { shop, sessionId, message, email, previousSessionId } = await request.json();
 
         if (!shop || !sessionId || !message) {
             return Response.json({ error: "Missing fields" }, { status: 400, headers: corsHeaders() });
         }
 
-        // 2. Pass everything to orchestrator
-        processChatTurn(shop, sessionId, message, email, previousSessionId).catch((err) => {
-            console.error("Background Error:", err);
+        const encoder = new TextEncoder();
+        const streamingResponse = new ReadableStream({
+            async start(controller) {
+                try {
+                    const { processStreamingChatTurn } = await import("app/services/ai/orchestrator");
+                    const aiStream = processStreamingChatTurn(shop, sessionId, message, email, previousSessionId);
+                    
+                    for await (const chunk of aiStream) {
+                        controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
+                    }
+                } catch (err) {
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "error", content: "Stream interrupted" })}\n\n`));
+                } finally {
+                    controller.close();
+                }
+            },
         });
 
-        return Response.json({ success: true }, { headers: corsHeaders() });
+        return new Response(streamingResponse, {
+            headers: {
+                ...corsHeaders(),
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            },
+        });
 
     } catch (error) {
         return Response.json({ success: false }, { status: 500, headers: corsHeaders() });

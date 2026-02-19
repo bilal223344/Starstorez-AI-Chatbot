@@ -234,6 +234,98 @@ export async function processChatTurn(
   }
 }
 
+/**
+ * Orchestrates a streaming response.
+ * Yields text chunks to the consumer.
+ */
+export async function* processStreamingChatTurn(
+  shop: string,
+  sessionId: string,
+  userMessage: string,
+  email?: string,
+  previousSessionId?: string
+) {
+  const safeShop = shop.replace(/\./g, "_");
+  const firebaseChatPath = `chats/${safeShop}/${sessionId}/messages`;
+  const metaPath = `chats/${safeShop}/${sessionId}/metadata`;
+
+  try {
+    // 1. Migration
+    if (email && previousSessionId && previousSessionId !== sessionId) {
+      await migrateGuestChatToCustomer(shop, previousSessionId, sessionId);
+    }
+
+    // 2. Human Handoff Check
+    const metaSnap = await rtdb.ref(metaPath).get();
+    const metadata = metaSnap.val() || {};
+    if (metadata.isHumanSupport) {
+      await rtdb.ref(firebaseChatPath).push({ sender: "user", text: userMessage, timestamp: Date.now() });
+      const { session } = await getOrCreateSession(shop, email || "guest");
+      await saveSingleMessage(session.id, "user", userMessage);
+      yield { type: "text", content: "Human support is active. A representative will be with you shortly." };
+      return;
+    }
+
+    // 3. Save User Message
+    await rtdb.ref(firebaseChatPath).push({ sender: "user", text: userMessage, timestamp: Date.now() });
+    const { session } = await getOrCreateSession(shop, email || "guest");
+
+    // 4. Init Streaming
+    const { LangChainService } = await import("./langchain.server");
+    const langChainService = new LangChainService(shop);
+    const history = (session.messages || []).map((m: any) => ({
+      role: m.role as "user" | "assistant",
+      content: m.content
+    }));
+
+    const stream = langChainService.generateStreamingResponse(sessionId, userMessage, history);
+    
+    let fullText = "";
+    let finalRecommendedProducts: any[] = [];
+
+    for await (const chunk of stream) {
+      if (chunk.type === "text") {
+        fullText += chunk.content;
+        yield chunk;
+      } else if (chunk.type === "metadata") {
+        finalRecommendedProducts = chunk.content.recommendedProducts || [];
+        yield chunk;
+      }
+    }
+
+    // 5. Final Save (SQL & Firebase full record)
+    const productsForDb = finalRecommendedProducts.map((p: any) => ({
+      id: p.id,
+      title: p.title || "",
+      price: typeof p.price === 'string' ? parseFloat(p.price) : (p.price || 0),
+      handle: p.handle || "",
+      image: p.image || "",
+      score: p.score || 0
+    }));
+
+    await saveChatTurn(session.id, userMessage, fullText, productsForDb);
+    
+    // We already pushed the chunks, but for historical consistency in Firebase
+    // it's often good to push the final complete message once, but wait...
+    // The widget listens to 'push' events. If we push every chunk, it works.
+    // If we only push the final one, it's not streaming in Firebase.
+    // Given the current architecture uses RTDB 'push', we'll rely on the API stream for real-time
+    // and push the FINAL record to Firebase for persistence after the stream ends.
+    // Actually, usually you'd push the message with 'sender: ai' once.
+    
+    await rtdb.ref(firebaseChatPath).push({
+      sender: "ai",
+      text: fullText,
+      product_ids: productsForDb.map((p: any) => p.id),
+      timestamp: Date.now(),
+    });
+
+  } catch (error) {
+    console.error("Streaming Orchestrator Error:", error);
+    yield { type: "text", content: "I encountered an error while processing your request." };
+  }
+}
+
 // =================================================================
 // 6. SUMMARIZATION
 // =================================================================
