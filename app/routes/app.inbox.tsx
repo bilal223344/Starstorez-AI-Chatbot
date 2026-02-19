@@ -597,6 +597,15 @@ export default function Inbox() {
 
 
   // --- Event Handlers -------------------------
+  
+  const handleScroll = () => {
+    if (!scrollRef.current || !hasOlderMessages || loadingOlder) return;
+    
+    // Trigger when scrolled to the top (with a small buffer)
+    if (scrollRef.current.scrollTop === 0) {
+      loadOlderMessages();
+    }
+  };
 
   const handleSelectSession = (sessionId: string) => {
     setSelectedSessionId(sessionId);
@@ -879,7 +888,7 @@ export default function Inbox() {
             isLoading={loadingSummary}
             customerName={selectedSession?.email}
           />
-          <div className="inbox-chat__messages" ref={scrollRef}>
+          <div className="inbox-chat__messages" ref={scrollRef} onScroll={handleScroll}>
             {/* Load More */}
             {hasOlderMessages && messages.length >= BATCH_SIZE && (
               <div className="inbox-chat__load-more">
@@ -1037,7 +1046,7 @@ export default function Inbox() {
 
       {/* ── DETAIL PANEL ── */}
       {showDetail && selectedSession && (
-        <DetailPanel session={selectedSession} onClose={() => setShowDetail(false)}>
+        <DetailPanel onClose={() => setShowDetail(false)}>
           <ProfileIdentity session={selectedSession} />
           
           <DetailSection title="Key Metrics">

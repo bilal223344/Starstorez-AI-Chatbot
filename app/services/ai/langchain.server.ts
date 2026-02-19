@@ -53,33 +53,23 @@ function matchesCampaignKeywords(
   triggerKeywords: string[]
 ): boolean {
   const normalizedMessage = userMessage.toLowerCase().trim();
+
+  // 1. Check database trigger keywords (word boundary match preferred)
+  const sanitizedTriggers = triggerKeywords.map(k => k.trim()).filter(k => k !== "");
+  const synonyms = (CAMPAIGN_SYNONYMS[campaignName] || []).map(s => s.trim()).filter(s => s !== "");
   
-  // 1. Check database trigger keywords (simple substring match)
-  const dbMatch = triggerKeywords.some(keyword => 
-    normalizedMessage.includes(keyword.toLowerCase())
-  );
-  if (dbMatch) return true;
+  const allKeywords = [...sanitizedTriggers, ...synonyms];
   
-  // 2. Check system campaign synonyms
-  const synonyms = CAMPAIGN_SYNONYMS[campaignName];
-  if (synonyms) {
-    const synonymMatch = synonyms.some(synonym => 
-      normalizedMessage.includes(synonym.toLowerCase())
-    );
-    if (synonymMatch) return true;
-  }
-  
-  // 3. Word boundary matching for better accuracy
+  // Word boundary matching for better accuracy
   // Match "popular" in "show me popular items" but not in "unpopular"
-  const allKeywords = [...triggerKeywords, ...(synonyms || [])];
-  const wordBoundaryMatch = allKeywords.some(keyword => {
+  const match = allKeywords.some(keyword => {
     // Escape special regex characters in keyword
     const escapedKeyword = keyword.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = new RegExp(`\\b${escapedKeyword}\\b`, 'i');
     return regex.test(normalizedMessage);
   });
   
-  return wordBoundaryMatch;
+  return match;
 }
 
 // ============================================================================
@@ -346,7 +336,10 @@ export class LangChainService {
     const responseTone = aiSettings.responseTone?.selectedTone?.join(", ") || "Helpful, Professional";
     const primaryLanguage = aiSettings.languageSettings?.primaryLanguage || "English";
 
-    // 2. Check CAMPAIGNS (Trigger Keywords) - Bypass LLM if match
+    // 2. Check CAMPAIGNS (Trigger Keywords) - Inject into LLM instead of bypassing
+    let campaignContext = "";
+    let recommendedProducts: Array<{ id: string, title?: string, price?: number, handle?: string, image?: string, score?: number }> = [];
+
     if (config.campaignsEnabled) {
         const campaigns = await prisma.campaign.findMany({
             where: { shop: this.shop, isActive: true },
@@ -354,13 +347,11 @@ export class LangChainService {
         });
         
         for (const camp of campaigns) {
-            // Use enhanced matching with synonyms and word boundaries
             const triggers = camp.triggerKeywords;
-            const match = matchesCampaignKeywords(userMessage, camp.name, triggers);
-            
-            if (match) {
-                console.log(`[LangChain] Direct Campaign Match: ${camp.name}`);
-                // Fetch campaign products
+            if (matchesCampaignKeywords(userMessage, camp.name, triggers)) {
+                console.log(`[LangChain] Campaign Keywords Matched: ${camp.name}`);
+                
+                // Pre-populate products
                 const campaignProducts = camp.products.map(cp => ({
                     id: cp.Product.prodId,
                     title: cp.Product.title,
@@ -369,9 +360,15 @@ export class LangChainService {
                     image: cp.Product.image || undefined,
                     score: 1.0
                 }));
+                recommendedProducts = [...recommendedProducts, ...campaignProducts];
 
-                const responseText = camp.responseMessage || `I've found some products for you in our ${camp.name} collection:`;
-                return { text: responseText, recommendedProducts: campaignProducts };
+                // Prepare context for LLM
+                campaignContext += `\n[SYSTEM ALERT: USER MATCHED CAMPAIGN "${camp.name}"]\n`;
+                if (camp.responseMessage) {
+                    campaignContext += `The merchant prefers this general message for this campaign: "${camp.responseMessage}"\n`;
+                }
+                campaignContext += `Associated Products: ${campaignProducts.map(p => p.title).join(", ")}\n`;
+                campaignContext += `INSTRUCTION: Acknowledge these products naturally in your response. Do NOT use the tool "recommend_products" again for this specific intent as we have already found the products.`;
             }
         }
     }
@@ -401,10 +398,13 @@ export class LangChainService {
       ${aiSettings.policies?.payment ? `Payment Policy: ${aiSettings.policies.payment}` : ""}
       ${aiSettings.policies?.refund ? `Refund Policy: ${aiSettings.policies.refund}` : ""}
 
+      ${campaignContext ? `\n[ONGOING CAMPAIGN CONTEXT]\n${campaignContext}\n` : ""}
+
       IMPORTANT:
       - You are ${assistantName}.
-      - Your persona is: ${persona}.
-      - Your tone should be ${responseTone}.
+      - **Persona Enforcement**: Embody the persona of "${persona}" in every interaction. If the persona is "Expert sales associate", be knowledgeable and professional. If it's "Friendly neighbor", be warm and casual.
+      - **Tone Enforcement**: Strictly maintain a "${responseTone}" tone. Ensure your word choice, sentence structure, and overall style consistently reflect these qualities. Do NOT slip into robotic or overly generic AI patterns.
+      - **Authenticity**: Avoid repetitive filler phrases. Each response should feel uniquely crafted for this customer and this store.
       - Respond ONLY in ${primaryLanguage} unless the user switches language, then adapt naturally but stay helpful.
       - ${customInstructions ? `Follow these specific instructions: ${customInstructions}` : ""}
       - Use the available tools to answer questions.
@@ -412,6 +412,7 @@ export class LangChainService {
       - Keep responses concise and friendly.
       - Do NOT recommend products unless the user explicitly asks for them or it's highly relevant.
       - If you don't know the answer based on the tools and context, politely say so.
+      - **Greetings & Small Talk**: If the user says "Hi", "Hello", or "How are you", respond warmly as ${assistantName} before moving to any sales assistance.
     `;
 
     // 5. Build Message History
@@ -459,7 +460,7 @@ export class LangChainService {
     if (!finalResponse || (finalResponse.content === "" && (!finalResponse.tool_calls || finalResponse.tool_calls.length === 0))) {
         console.warn("[LangChain] Model response is virtually empty. Potential filtering issue.");
     }
-    let recommendedProducts: Array<{ id: string, title?: string, price?: number, handle?: string, image?: string, score?: number }> = [];
+    // recommendedProducts is already pre-populated if a campaign was matched
 
     // Handle Tool Calls (Single turn for now, or loop if needed)
     if (finalResponse.tool_calls && finalResponse.tool_calls.length > 0) {

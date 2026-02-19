@@ -2,7 +2,7 @@ import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "re
 import { useFetcher, useLoaderData } from "react-router";
 import { authenticate } from "../shopify.server";
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { formatDistanceToNow, subDays } from "date-fns";
+// date-fns imports removed as they are unused
 import prisma from "../db.server";
 import { syncProduct } from "app/services/productService";
 
@@ -51,20 +51,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     prisma.chatSession.count({
       where: {
         shop,
-        Message: { some: {} },
+        messages: { some: {} },
         // Logic: Session exists, has messages, but NO assistant reply implies human needed OR manual takeover
-        NOT: { Message: { some: { role: "assistant" } } }
+        NOT: { messages: { some: { role: "assistant" } } }
       }
     }),
 
     // C. Recent Conversations
     prisma.chatSession.findMany({
       where: { shop },
-      take: 5,
+      take: 10,
       orderBy: { createdAt: "desc" },
       include: {
         Customer: true,
-        Message: {
+        messages: {
           take: 1,
           orderBy: { createdAt: "desc" }
         }
@@ -213,17 +213,17 @@ export default function Dashboard() {
                       </s-stack>
                     </s-table-cell>
                     <s-table-cell>
-                      <s-badge tone={(chat as any).Message[0]?.role === "assistant" ? "success" : "caution"}>
-                        {(chat as any).Message[0]?.role === "assistant" ? "AI Managed" : "Awaiting Reply"}
+                      <s-badge tone={(chat as any).messages[0]?.role === "assistant" ? "success" : "caution"}>
+                        {(chat as any).messages[0]?.role === "assistant" ? "AI Managed" : "Awaiting Reply"}
                       </s-badge>
                     </s-table-cell>
                     <s-table-cell>
                       <div style={{ maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        <s-text tone="neutral">{(chat as any).Message[0]?.content || "No messages"}</s-text>
+                        <s-text tone="neutral">{(chat as any).messages[0]?.content || "No messages"}</s-text>
                       </div>
                     </s-table-cell>
                     <s-table-cell>
-                      {formatDistanceToNow(new Date(chat.createdAt))} ago
+                      {new Date((chat as any).messages[0]?.createdAt || chat.createdAt).toLocaleString()}
                     </s-table-cell>
                   </s-table-row>
                 ))

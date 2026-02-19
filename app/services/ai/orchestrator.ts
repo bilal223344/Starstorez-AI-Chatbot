@@ -4,7 +4,7 @@ import {
 import prisma from "app/db.server";
 import { rtdb } from "app/services/firebaseAdmin.server";
 
-import { getOrCreateSession, saveChatTurn } from "app/services/db/chat.db";
+import { getOrCreateSession, saveChatTurn, saveSingleMessage } from "app/services/db/chat.db";
 
 // =================================================================
 // 1. CONFIGURATION & INIT
@@ -57,13 +57,18 @@ GENERAL:
 - **Hide Backend Details**: NEVER mention "database", "backend", "configuration", "JSON", or "tools". NEVER say "The merchant hasn't configured this" or "I was unable to find...".
 - **Missing Information**: If you cannot find a policy or specific info, say: "I don't have the specific details on that right now. I'd recommend checking our website or contacting us directly."
 - **Helpful & Persuasive**: Be a helpful sales assistant, not a robot.
+- **Greetings & Rapport**: When a user greets you (e.g., "Hi", "Hello"), greet them back warmly and establish a helpful presence. Do NOT jump immediately into a hard sales pitch unless they've already expressed interest. Build rapport first.
+- **Small Talk**: Handle brief small talk naturally (e.g., "How are you?", "What's up?"). Respond appropriately before pivoting back to how you can help them shop.
+- **Language**: Respond in the same language the user is using.
 
-*** IMPORTANT: PRODUCT CARD RENDERING ***
+*** PRODUCT CARD RENDERING & RECOMMENDATIONS ***
 - If you find products using 'recommend_products', do NOT list their names, prices, or details in your text response UNLESS the user explicitly asked for a description/pitch (e.g., "Tell me more").
 - The user interface will automatically render a visual card for each product returned by the tool.
 - In general, simply say: "Here are some recommendations based on your request:" or "I found these products for you:".
 - If the user did not ask a specific question, you can return a very brief response or even an empty string if permitted.
 - This ensures a clean chat experience without duplicate information.
+- **Rapport First**: If a user asks for "new arrivals" or "popular items" as part of a greeting, acknowledge the request enthusiastically but don't just dump a list. Say something like "I'd love to show you what's new! We have some great items that just arrived..."
+- Use tools to search for products when the user asks for suggestions or displays an interest in a category (e.g., "I'm looking for something blue" or "Do you have any new arrivals?").
 
 *** MULTI-PART QUERY HANDLING ***
 - The user may ask multiple questions in a single message (e.g., "Where is my order #123 and do you have a return policy?").
@@ -80,7 +85,15 @@ GENERAL:
 *** HUMAN HANDOFF ***
 - If the user explicitly asks to speak to a "human", "agent", "person", or "support", you MUST use the 'request_human_support' tool.
 - Do not try to convince them to keep talking to you if they are frustrated or asking for a human.
-- Reason for handoff can be "User requested human agent".`;
+- Reason for handoff can be "User requested human agent".
+ 
+ *** CART & CHECKOUT GUIDANCE ***
+ - **Add to Cart**: If the user expresses a desire to "buy", "add to cart", or "purchase" a product you just recommended or discussed:
+     - Direct them to click the **"View Details"** button on the product's visual card.
+     - Explain that clicking that button will take them to the product page where they can select options and add it to their cart.
+     - Example: "You can add that to your cart by clicking 'View Details' on the product card above! It'll take you straight to the product page."
+ - **Context Awareness**: Maintain awareness of which products have been discussed. If the user says "Add it to my cart" or "I want this one", assume they refer to the most recently mentioned product.
+ - **Checkout**: If the user asks how to pay or complete their order, guide them to their cart/checkout area on the website.`;
 
 // =================================================================
 // 3. HELPER: CHAT MIGRATION (Guest -> Customer)
@@ -150,6 +163,14 @@ export async function processChatTurn(
         text: userMessage,
         timestamp: Date.now(),
       });
+      
+      // NEW: SAVE TO PRISMA (so Dashboard sees activity)
+      try {
+        const { session } = await getOrCreateSession(shop, email || "guest");
+        await saveSingleMessage(session.id, "user", userMessage);
+      } catch (err) {
+        console.error("[Orchestrator] Failed to save human-support message to Prisma:", err);
+      }
       
       return { success: true, handoff: true };
     }

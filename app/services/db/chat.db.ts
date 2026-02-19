@@ -44,6 +44,16 @@ export async function getOrCreateSession(shop: string, custMail: string) {
     return { session: newSession, customerId: customer.id };
 }
 
+export async function saveSingleMessage(
+    sessionId: string,
+    role: "user" | "assistant",
+    content: string
+) {
+    return await prisma.message.create({
+        data: { sessionId, role, content }
+    });
+}
+
 export async function saveChatTurn(
     sessionId: string,
     userText: string,
