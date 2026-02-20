@@ -377,7 +377,10 @@ export default function ProductsManagement() {
                                         <s-badge tone={product.isSynced ? "success" : "neutral"}>{product.isSynced ? "Yes" : "No"}</s-badge>
                                     </s-table-cell>
                                     <s-table-cell>
-                                        <s-button onClick={() => shopify.intents.invoke?.("edit:shopify/Product", { value: product.prodId })} variant="tertiary">Edit</s-button>
+                                        <s-button onClick={() => {
+                                            const formattedId = product.prodId.includes("gid://") ? product.prodId : `gid://shopify/Product/${product.prodId}`;
+                                            shopify.intents.invoke?.("edit:shopify/Product", { value: formattedId })
+                                        }} variant="tertiary">Edit</s-button>
                                     </s-table-cell>
                                 </s-table-row>
                             ))

@@ -1,20 +1,17 @@
 import { CircleQuestionMark, StickyNote } from "lucide-react";
 import { CallbackEvent } from "@shopify/polaris-types";
-import { useState, useEffect } from "react";
-import { useFetcher } from "react-router";
-
-
+import { useState, useEffect, useRef } from "react";
+import { useFetcher, useSearchParams, useNavigation } from "react-router";
 
 interface Product {
     id: number;
+    prodId: string;
     title: string;
-    status: string;
-    totalInventory: number;
-    totalVariants: number;
+    stock: number;
     tags: string[];
-    vendor: string;
+    image: string | null;
     faqs: FAQ[];
-    shop: string;
+    variants: { id: number }[];
 }
 
 interface FAQ {
@@ -31,32 +28,69 @@ interface WindowWithShopify extends Window {
     };
 }
 
-export default function Products({ products: initialProducts }: { products: Product[] }) {
+export interface ProductsPaginatedData {
+    items: Product[];
+    page: number;
+    hasNextPage: boolean;
+    hasPreviousPage: boolean;
+    total: number;
+    query: string;
+}
+
+export default function Products({ products: initialProductsData }: { products: ProductsPaginatedData | null }) {
     const fetcher = useFetcher();
+    const [searchParams, setSearchParams] = useSearchParams();
+    const navigation = useNavigation();
+
+    const initialProducts = initialProductsData?.items || [];
+    const hasNextPage = initialProductsData?.hasNextPage || false;
+    const hasPreviousPage = initialProductsData?.hasPreviousPage || false;
+    const initialQuery = initialProductsData?.query || "";
 
     const [products, setProducts] = useState<Product[]>(initialProducts);
     const [activeProduct, setActiveProduct] = useState<Product | null>(null);
-    const [searchTerm, setSearchTerm] = useState("");
+    const [searchTerm, setSearchTerm] = useState(initialQuery);
     const [newQuestion, setNewQuestion] = useState("");
     const [newAnswer, setNewAnswer] = useState("");
 
     // Sync fetched data into local state when prop changes
     useEffect(() => {
-        setProducts(initialProducts);
-    }, [initialProducts]);
+        setProducts(initialProductsData?.items || []);
+    }, [initialProductsData]);
 
+    const timerRef = useRef<NodeJS.Timeout | null>(null);
 
+    const handleSearchChange = (e: CallbackEvent<"s-search-field">) => {
+        const value = e.currentTarget.value;
+        setSearchTerm(value);
+        if (timerRef.current) clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(() => {
+            searchParams.set("query", value);
+            searchParams.set("page", "1");
+            setSearchParams(searchParams);
+        }, 500);
+    };
 
-    const filteredProducts = products.filter(p =>
-        p.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        p.vendor.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        p.tags.some(t => t.toLowerCase().includes(searchTerm.toLowerCase()))
-    );
+    const handleNextPage = () => {
+        if (!hasNextPage) return;
+        const currentPage = parseInt(searchParams.get("page") || "1", 10);
+        searchParams.set("page", String(currentPage + 1));
+        setSearchParams(searchParams);
+    };
+
+    const handlePreviousPage = () => {
+        if (!hasPreviousPage) return;
+        const currentPage = parseInt(searchParams.get("page") || "1", 10);
+        searchParams.set("page", String(Math.max(1, currentPage - 1)));
+        setSearchParams(searchParams);
+    };
+
+    const isNavigating = navigation.state === "loading";
 
     const handleFaqClick = (product: Product) => {
         setActiveProduct(product);
     };
-
+console.log(products)
     const handleCreateFaq = () => {
         if (!activeProduct || !newQuestion.trim() || !newAnswer.trim()) return;
         const formData = new FormData();
@@ -70,9 +104,9 @@ export default function Products({ products: initialProducts }: { products: Prod
         const tempId = `temp - ${Date.now()} `;
         const newFaqItem: FAQ = { id: tempId, question: newQuestion, answer: newAnswer };
         setProducts(prev => prev.map(p =>
-            p.id === activeProduct.id ? { ...p, faqs: [...p.faqs, newFaqItem] } : p
+            p.id === activeProduct.id ? { ...p, faqs: [...(p.faqs || []), newFaqItem] } : p
         ));
-        setActiveProduct(prev => prev ? { ...prev, faqs: [...prev.faqs, newFaqItem] } : null);
+        setActiveProduct(prev => prev ? { ...prev, faqs: [...(prev.faqs || []), newFaqItem] } : null);
         setNewQuestion("");
         setNewAnswer("");
     };
@@ -86,9 +120,9 @@ export default function Products({ products: initialProducts }: { products: Prod
 
         // Optimistic update
         setProducts(prev => prev.map(p =>
-            p.id === activeProduct.id ? { ...p, faqs: p.faqs.filter(f => f.id !== faqId) } : p
+            p.id === activeProduct.id ? { ...p, faqs: (p.faqs || []).filter(f => f.id !== faqId) } : p
         ));
-        setActiveProduct(prev => prev ? { ...prev, faqs: prev.faqs.filter(f => f.id !== faqId) } : null);
+        setActiveProduct(prev => prev ? { ...prev, faqs: (prev.faqs || []).filter(f => f.id !== faqId) } : null);
     };
 
     return (
@@ -101,21 +135,28 @@ export default function Products({ products: initialProducts }: { products: Prod
                         <s-divider direction="block" />
 
                         <s-button-group gap="none">
-                            <s-button slot="secondary-actions">Add Product</s-button>
-                            <s-button slot="secondary-actions">Import Products</s-button>
-                            <s-button slot="secondary-actions">Sync All</s-button>
+                            <s-button slot="secondary-actions" disabled>Add Product</s-button>
+                            <s-button slot="secondary-actions" disabled>Import Products</s-button>
+                            <s-button slot="secondary-actions" disabled>Sync All</s-button>
                         </s-button-group>
                     </s-stack>
                     <s-stack direction="inline" gap="base">
-                        <s-button variant="tertiary" icon="download"></s-button>
-                        <s-button icon="reset">Sync</s-button>
-                        <s-button variant="primary" icon="plus">Add Product</s-button>
+                        <s-button variant="tertiary" icon="download" disabled></s-button>
+                        <s-button icon="reset" disabled>Sync</s-button>
+                        <s-button variant="primary" icon="plus" disabled>Add Product</s-button>
                     </s-stack>
                 </s-stack>
             </s-section>
 
             <s-section padding="none">
-                <s-table paginate>
+                <s-table 
+                    paginate 
+                    hasPreviousPage={hasPreviousPage} 
+                    hasNextPage={hasNextPage} 
+                    onNextPage={handleNextPage} 
+                    onPreviousPage={handlePreviousPage}
+                    loading={isNavigating}
+                >
                     {/* --- Filters Slot --- */}
                     <div slot="filters">
                         <s-grid gridTemplateColumns="1fr auto auto" gap="small" alignItems="center">
@@ -123,7 +164,7 @@ export default function Products({ products: initialProducts }: { products: Prod
                             <s-search-field
                                 placeholder="Search products..."
                                 value={searchTerm}
-                                onInput={(e: CallbackEvent<"s-search-field">) => setSearchTerm(e.currentTarget.value)}
+                                onInput={handleSearchChange}
                             />
 
                             {/* Filter Button + Popover */}
@@ -184,22 +225,22 @@ export default function Products({ products: initialProducts }: { products: Prod
 
                     {/* --- Table Body --- */}
                     <s-table-body>
-                        {filteredProducts.map((product) => (
+                        {products.map((product) => (
                             <s-table-row key={product.id}>
                                 <s-table-cell>
                                     <s-stack direction="inline" alignItems="center" gap="small">
-                                        <s-thumbnail size="small" src="" alt={product.title} />
+                                        <s-thumbnail size="small" src={product.image || ""} alt={product.title} />
                                         <s-stack>
                                             <s-link target="_blank">{product.title}</s-link>
-                                            <s-text>{product.vendor}</s-text>
+                                            <s-text>{(product as string).vendor}</s-text>
                                         </s-stack>
                                     </s-stack>
                                 </s-table-cell>
                                 <s-table-cell><s-badge tone="success">ACTIVE</s-badge></s-table-cell>
                                 <s-table-cell>
                                     <s-stack>
-                                        <s-text><span style={{ fontWeight: "bold" }}>{product.totalInventory || 0}</span> in stock</s-text>
-                                        <s-text>{product.totalVariants || 0} variant</s-text>
+                                        <s-text><span style={{ fontWeight: "bold" }}>{product.stock || 0}</span> in stock</s-text>
+                                        <s-text>{product.variants?.length || 0} variant{product.variants?.length !== 1 ? 's' : ''}</s-text>
                                     </s-stack>
                                 </s-table-cell>
                                 <s-table-cell>
@@ -223,7 +264,10 @@ export default function Products({ products: initialProducts }: { products: Prod
                                     </s-button>
                                 </s-table-cell>
                                 <s-table-cell>
-                                    <s-button onClick={() => (window as unknown as WindowWithShopify).shopify?.intents?.invoke?.("edit:shopify/Product", { id: product.id })} variant="tertiary">Edit</s-button>
+                                    <s-button onClick={() => {
+                                        const formattedId = product.prodId.includes("gid://") ? product.prodId : `gid://shopify/Product/${product.prodId}`;
+                                        (window as unknown as WindowWithShopify).shopify?.intents?.invoke?.("edit:shopify/Product", { value: formattedId })
+                                    }} variant="tertiary">Edit</s-button>
                                 </s-table-cell>
                             </s-table-row>
                         ))}

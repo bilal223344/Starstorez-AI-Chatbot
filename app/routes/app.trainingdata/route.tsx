@@ -187,9 +187,45 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // --- DEFER ---
     // We only trigger the Promise for the ACTIVE tab. Others are null.
 
+    const getProductsData = async () => {
+        const pageStr = url.searchParams.get("page") || "1";
+        const page = parseInt(pageStr, 10);
+        const query = url.searchParams.get("query") || "";
+        const itemsPerPage = 10;
+        const skip = (page - 1) * itemsPerPage;
+
+        const where: Record<string, unknown> = { shop };
+        if (query) {
+            where.OR = [
+                { title: { contains: query, mode: 'insensitive' } },
+                { description: { contains: query, mode: 'insensitive' } }
+            ];
+        }
+
+        const totalProducts = await prisma.product.count({ where });
+        const items = await prisma.product.findMany({
+            where,
+            include: { faqs: true, variants: true },
+            orderBy: { title: 'asc' },
+            skip,
+            take: itemsPerPage
+        });
+
+        const totalPages = Math.ceil(totalProducts / itemsPerPage);
+
+        return {
+            items,
+            page,
+            hasNextPage: page < totalPages,
+            hasPreviousPage: page > 1,
+            total: totalProducts,
+            query
+        };
+    };
+
     return {
         shop,
-        products: tab === "products" ? await prisma.product.findMany({ where: { shop }, include: { faqs: true }, orderBy: { title: 'asc' } }) : null,
+        products: tab === "products" ? await getProductsData() : null,
         discounts: tab === "discounts" ? await getDiscountData() : null,
         policies: tab === "policies" ? await getPolicyData() : null,
         faqs: tab === "faqs" ? await getFaqData() : null,
@@ -680,23 +716,28 @@ export default function TrainingData() {
         switch (activeTab) {
             case "products":
                 if (!loaderData.products) return null;
-                // @ts-expect-error - products prop type mismatch
-                return <Products products={loaderData.products || []} />;
-            case "discounts":
+                return <Products products={loaderData.products} />;
+            case "discounts": {
                 if (!loaderData.discounts) return null;
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const d = loaderData.discounts as { discounts: any[], discountSuggestionsEnabled: boolean };
                 return <Discount 
-                    discounts={(loaderData.discounts as any)?.discounts || []} 
-                    discountSuggestionsEnabled={(loaderData.discounts as any)?.discountSuggestionsEnabled ?? true} 
+                    discounts={d?.discounts || []} 
+                    discountSuggestionsEnabled={d?.discountSuggestionsEnabled ?? true} 
                 />;
-            case "policies":
+            }
+            case "policies": {
                 if (!loaderData.policies) return null;
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                return <Policies policies={(loaderData.policies as any)?.policies || []} hasScope={(loaderData.policies as any)?.hasScope || false} />;
-            case "recommendations":
+                const p = loaderData.policies as { policies: any[], hasScope: boolean };
+                return <Policies policies={p?.policies || []} hasScope={p?.hasScope || false} />;
+            }
+            case "recommendations": {
                 if (!loaderData.recommendations) return null;
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                return <ProductRecommendations campaigns={(loaderData.recommendations as any)?.campaigns || []} products={(loaderData.recommendations as any)?.products || []} />;
+                const r = loaderData.recommendations as { campaigns: any[], products: any[] };
+                return <ProductRecommendations campaigns={r?.campaigns || []} products={r?.products || []} />;
+            }
             case "profile":
                 if (!loaderData.profile) return null;
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -707,8 +748,7 @@ export default function TrainingData() {
                 return <FAQs faqs={loaderData.faqs as any || []} />;
             default:
                 if (!loaderData.products) return null;
-                // @ts-expect-error - products prop type mismatch due to serialization
-                return <Products products={loaderData.products || []} />;
+                return <Products products={loaderData.products} />;
         }
     };
 
