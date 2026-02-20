@@ -297,7 +297,8 @@ export class LangChainService {
   private async getChatContext(
     sessionId: string,
     userMessage: string,
-    history: { role: string; content: string }[] = []
+    history: { role: string; content: string; recommendedProducts?: any[] }[] = [],
+    previewSettings?: any
   ) {
     // 1. Load Config & Context
     const config = await prisma.chatConfiguration.findUnique({ 
@@ -328,7 +329,8 @@ export class LangChainService {
     const aiSettingsRecord = await prisma.aISettings.findUnique({
       where: { shop: this.shop }
     });
-    const aiSettings = (aiSettingsRecord?.settings as any) || {};
+    const savedSettings = (aiSettingsRecord?.settings as any) || {};
+    const aiSettings = previewSettings ? { ...savedSettings, ...previewSettings } : savedSettings;
 
     const assistantName = aiSettings.storeDetails?.about ? `${aiSettings.storeDetails.about} Assistant` : "Helpful Store Assistant";
     const persona = aiSettings.responseTone?.customInstructions || "Expert sales associate";
@@ -402,9 +404,20 @@ export class LangChainService {
     `;
 
     // 5. Build Message History
+    const formattedHistory = history.map(m => {
+        let content = m.content;
+        if (m.role === "assistant" && m.recommendedProducts && m.recommendedProducts.length > 0) {
+            const productStrings = m.recommendedProducts.map((p: any) => 
+                `ID: ${p.id || p.productProdId}, Title: ${p.title}, Price: $${p.price}`
+            ).join(" | ");
+            content += `\n\n[System Context: You rendered visual product cards to the user for the following items: ${productStrings}]`;
+        }
+        return m.role === "user" ? new HumanMessage(content) : new AIMessage(content);
+    });
+
     const messages: BaseMessage[] = [
         new SystemMessage(systemPrompt),
-        ...history.map(m => m.role === "user" ? new HumanMessage(m.content) : new AIMessage(m.content)),
+        ...formattedHistory,
         new HumanMessage(userMessage)
     ];
 
@@ -414,9 +427,10 @@ export class LangChainService {
   async generateResponse(
     sessionId: string,
     userMessage: string,
-    history: { role: string; content: string }[] = []
+    history: { role: string; content: string; recommendedProducts?: any[] }[] = [],
+    previewSettings?: any
   ) {
-    const { messages, tools, recommendedProducts: campaignProducts } = await this.getChatContext(sessionId, userMessage, history);
+    const { messages, tools, recommendedProducts: campaignProducts } = await this.getChatContext(sessionId, userMessage, history, previewSettings);
     let recommendedProducts = [...campaignProducts];
     const modelWithTools = this.model.bindTools(tools);
 
@@ -466,11 +480,12 @@ export class LangChainService {
   async *generateStreamingResponse(
     sessionId: string,
     userMessage: string,
-    history: { role: string; content: string }[] = []
+    history: { role: string; content: string; recommendedProducts?: any[] }[] = [],
+    previewSettings?: any
   ): AsyncGenerator<{ type: "text" | "metadata"; content: any }> {
     let context;
     try {
-        context = await this.getChatContext(sessionId, userMessage, history);
+        context = await this.getChatContext(sessionId, userMessage, history, previewSettings);
     } catch (err: any) {
         yield { type: "text", content: err.message };
         return;

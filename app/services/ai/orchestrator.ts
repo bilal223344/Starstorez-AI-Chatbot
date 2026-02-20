@@ -190,9 +190,10 @@ export async function processChatTurn(
     const langChainService = new LangChainService(shop);
 
     // Convert DB history to LangChain format
-    const history = (session.messages || []).map((m: { role: string; content: string }) => ({
+    const history = (session.messages || []).map((m: any) => ({
       role: m.role as "user" | "assistant",
-      content: m.content
+      content: m.content,
+      recommendedProducts: m.recommendedProducts || []
     }));
 
     // Generate Response
@@ -243,7 +244,8 @@ export async function* processStreamingChatTurn(
   sessionId: string,
   userMessage: string,
   email?: string,
-  previousSessionId?: string
+  previousSessionId?: string,
+  previewSettings?: any
 ) {
   const safeShop = shop.replace(/\./g, "_");
   const firebaseChatPath = `chats/${safeShop}/${sessionId}/messages`;
@@ -275,10 +277,11 @@ export async function* processStreamingChatTurn(
     const langChainService = new LangChainService(shop);
     const history = (session.messages || []).map((m: any) => ({
       role: m.role as "user" | "assistant",
-      content: m.content
+      content: m.content,
+      recommendedProducts: m.recommendedProducts || []
     }));
 
-    const stream = langChainService.generateStreamingResponse(sessionId, userMessage, history);
+    const stream = langChainService.generateStreamingResponse(sessionId, userMessage, history, previewSettings);
     
     let fullText = "";
     let finalRecommendedProducts: any[] = [];

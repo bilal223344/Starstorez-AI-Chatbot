@@ -284,6 +284,16 @@ function filterAndRankMatches(
 
         m.score = (m.score || 0) + bonus;
 
+        // 4. Anti-Hallucination Minimum Threshold
+        // For specific searches (not generic/browsing), if there's no partial keyword match,
+        // and the base Pinecone score is below a strict threshold (e.g., 0.72), it's likely a hallucination
+        // (i.e., asking for a non-existent product category like iPhone cases when selling furniture).
+        // Pinecone uses cosine similarity (-1.0 to 1.0).
+        if (!isGeneric && !hasKeywordMatch && (m.score - bonus) < 0.72) {
+            debug.droppedCount++;
+            return false;
+        }
+
         return true;
     });
 

@@ -26,7 +26,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     try {
-        const { shop, sessionId, message, email, previousSessionId } = await request.json();
+        const { shop, sessionId, message, email, previousSessionId, previewSettings } = await request.json();
 
         if (!shop || !sessionId || !message) {
             return Response.json({ error: "Missing fields" }, { status: 400, headers: corsHeaders() });
@@ -37,7 +37,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             async start(controller) {
                 try {
                     const { processStreamingChatTurn } = await import("app/services/ai/orchestrator");
-                    const aiStream = processStreamingChatTurn(shop, sessionId, message, email, previousSessionId);
+                    const aiStream = processStreamingChatTurn(shop, sessionId, message, email, previousSessionId, previewSettings);
                     
                     for await (const chunk of aiStream) {
                         controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));

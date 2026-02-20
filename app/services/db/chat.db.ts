@@ -8,7 +8,7 @@ export async function getOrCreateSession(shop: string, custMail: string) {
     if (!custMail || custMail === "guest") {
         const guestSession = (await prisma.chatSession.create({
             data: { shop, isGuest: true },
-            include: { messages: true }
+            include: { messages: { include: { recommendedProducts: true } } }
         } as any)) as any;
 
         return { session: guestSession, customerId: null };
@@ -29,7 +29,11 @@ export async function getOrCreateSession(shop: string, custMail: string) {
     const session = (await prisma.chatSession.findFirst({
         where: { customerId: customer.id, shop },
         include: {
-            messages: { take: 10, orderBy: { createdAt: "asc" } }
+            messages: { 
+                take: 10, 
+                orderBy: { createdAt: "asc" },
+                include: { recommendedProducts: true }
+            }
         }
     } as any)) as any;
 
@@ -38,7 +42,7 @@ export async function getOrCreateSession(shop: string, custMail: string) {
     // 3. Create New
     const newSession = (await prisma.chatSession.create({
         data: { shop, customerId: customer.id, isGuest: false },
-        include: { messages: true }
+        include: { messages: { include: { recommendedProducts: true } } }
     } as any)) as any;
 
     return { session: newSession, customerId: customer.id };

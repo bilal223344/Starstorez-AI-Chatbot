@@ -55,7 +55,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function Instructions() {
-    const { aiSettings: rawSettings } = useLoaderData<typeof loader>();
+    const { aiSettings: rawSettings, shop } = useLoaderData<typeof loader>();
     const aiSettings = (rawSettings as unknown as AISettingsType) || ({} as AISettingsType);
     const submit = useSubmit();
     const navigation = useNavigation();
@@ -97,33 +97,98 @@ export default function Instructions() {
     // Chat Simulation State
     const [input, setInput] = useState("");
     const [chatHistory, setChatHistory] = useState([
-        { sender: 'ai', text: `Hi! I'm ${assistantName || 'your assistant'}. How can I help you today?` }
+        { sender: 'ai', text: `Hi! I'm ${aiSettings.assistantName || 'your assistant'}. How can I help you today?` }
     ]);
     const [isTyping, setIsTyping] = useState(false);
     const chatEndRef = useRef<HTMLDivElement>(null);
+    const [previewSessionId] = useState(`preview-${Date.now()}`);
 
     // Auto-scroll chat
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [chatHistory, isTyping]);
 
-    const handleSimulateSend = () => {
+    const handleSimulateSend = async () => {
         if (!input.trim()) return;
 
-        const newUserMsg = { sender: 'user', text: input };
-        setChatHistory(prev => [...prev, newUserMsg]);
+        const currentInput = input;
+        const newUserMsg = { sender: 'user', text: currentInput };
+        
+        // Add user message and empty AI message placeholder
+        setChatHistory(prev => [...prev, newUserMsg, { sender: 'ai', text: "" }]);
         setInput("");
         setIsTyping(true);
 
-        // Simulate AI Response
-        setTimeout(() => {
-            setIsTyping(false);
-            const aiResponse = {
-                sender: 'ai',
-                text: "That's a great question! I'm currently in preview mode, but I'll be able to help you with your store once you save these settings."
+        try {
+            const previewSettings = {
+                assistantName,
+                basePersona,
+                customInstructions,
+                toneOfVoice,
+                responseLength,
+                allowEmojis,
+                primaryLanguage,
+                autoDetect,
+                behaviors
             };
-            setChatHistory(prev => [...prev, aiResponse]);
-        }, 1500);
+
+            const response = await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    shop: shop,
+                    sessionId: previewSessionId,
+                    message: currentInput,
+                    previewSettings
+                })
+            });
+
+            if (!response.body) throw new Error("No response body");
+            
+            setIsTyping(false); // Done thinking, start receiving stream
+            
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let accumulatedText = "";
+
+            let streamActive = true;
+            while (streamActive) {
+                const { done, value } = await reader.read();
+                if (done) {
+                    streamActive = false;
+                    break;
+                }
+
+                const chunk = decoder.decode(value, { stream: true });
+                const lines = chunk.split('\n');
+                
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.substring(6));
+                            if (data.type === 'text') {
+                                accumulatedText += data.content;
+                                setChatHistory(prev => {
+                                    const newHistory = [...prev];
+                                    newHistory[newHistory.length - 1] = { sender: 'ai', text: accumulatedText };
+                                    return newHistory;
+                                });
+                            }
+                        } catch (e) {
+                            // ignore parse errors for partial chunks
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.error("Simulation error:", error);
+            setIsTyping(false);
+            setChatHistory(prev => {
+                const newHistory = [...prev];
+                newHistory[newHistory.length - 1] = { sender: 'ai', text: "Error connecting to AI preview." };
+                return newHistory;
+            });
+        }
     };
 
     const handleResetSimulation = () => {
