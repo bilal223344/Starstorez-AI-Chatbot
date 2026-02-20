@@ -320,7 +320,7 @@ export default function ProductRecommendations({ campaigns: initialCampaigns, pr
                                 </s-stack>
                             </div>
 
-                            <s-stack direction="inline" justifyContent="end" alignItems="center">
+                            <s-stack direction="inline" justifyContent="end" alignItems="center" gap="small">
                                 <s-text>{count} products selected</s-text>
                                 <s-button onClick={() => handleConfigureSystemCampaign(name)}>Configure</s-button>
                             </s-stack>
