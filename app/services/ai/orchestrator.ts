@@ -4,7 +4,7 @@ import {
 import prisma from "app/db.server";
 import { rtdb } from "app/services/firebaseAdmin.server";
 
-import { getOrCreateSession, saveChatTurn, saveSingleMessage } from "app/services/db/chat.db";
+import { getOrCreateSession } from "app/services/db/chat.db";
 
 // =================================================================
 // 1. CONFIGURATION & INIT
@@ -39,6 +39,11 @@ CORE BEHAVIORS:
 - If a user asks for "more details" or specifics about a product, USE THE 'get_product_details' tool.
 - **SUMMARIZE THE DETAILS**: When answering, do NOT dump the full text. Create a concise summary including the Title, Price, Key Features, and Type.
 
+*** CONTEXT & MEMORY ***
+- **Pronoun Resolution**: If the user uses pronouns like "it", "this", "that", or "the product" in a follow-up question (e.g. "what colors are available?", "tell me about it"), YOU MUST look at the immediate previous turn to find the product name being discussed.
+- **Implicit Context**: Even if the user does not use a pronoun, if they ask a continuous question (e.g. "tell me features, specifications, and benefits"), assume they are referring to the product just discussed.
+- **Tool Usage**: Use the 'get_product_details' tool with the 'title' parameter set to the previously mentioned product name to fetch the missing details before answering. NEVER say "I don't know which product you're referring to" if you just talked about a product.
+
 RULES FOR "recommend_products":
 - **Relevance is King**: If the user asks for a specific TYPE of product (e.g., "expensive jewelry"), your 'search_query' MUST be "jewelry". Do NOT set it to "expensive product".
 - If user explicitly says "Sort by price high to low", then set 'sort' to 'price_desc'.
@@ -69,6 +74,11 @@ GENERAL:
 - This ensures a clean chat experience without duplicate information.
 - **Rapport First**: If a user asks for "new arrivals" or "popular items" as part of a greeting, acknowledge the request enthusiastically but don't just dump a list. Say something like "I'd love to show you what's new! We have some great items that just arrived..."
 - Use tools to search for products when the user asks for suggestions or displays an interest in a category (e.g., "I'm looking for something blue" or "Do you have any new arrivals?").
+
+*** RULES FOR "search_faq":
+- **ALWAYS use this tool FIRST** if the user asks a question about policies, shipping, returns, or general store information.
+- If a user asks a question about a specific product (e.g., "Is this waterproof?", "What is the warranty on this?"), use 'search_faq' to check for product-specific rules or answers.
+- NEVER guess an answer to a procedural question without checking 'search_faq' first.
 
 *** MULTI-PART QUERY HANDLING ***
 - The user may ask multiple questions in a single message (e.g., "Where is my order #123 and do you have a return policy?").
@@ -164,12 +174,11 @@ export async function processChatTurn(
         timestamp: Date.now(),
       });
       
-      // NEW: SAVE TO PRISMA (so Dashboard sees activity)
+      // NEW: Ensure session exists in Prisma (for user counting/analytics ONLY, no messages saved here)
       try {
-        const { session } = await getOrCreateSession(shop, email || "guest");
-        await saveSingleMessage(session.id, "user", userMessage);
+              await getOrCreateSession(shop, email || "guest", sessionId);
       } catch (err) {
-        console.error("[Orchestrator] Failed to save human-support message to Prisma:", err);
+        console.error("[Orchestrator] Failed to ensure Prisma session:", err);
       }
       
       return { success: true, handoff: true };
@@ -182,19 +191,26 @@ export async function processChatTurn(
       timestamp: Date.now(),
     });
 
-    // D. SESSION MANAGEMENT (DB Layer)
-    const { session } = await getOrCreateSession(shop, email || "guest");
+    // D. SESSION MANAGEMENT (DB Layer for Analytics only)
+    await getOrCreateSession(shop, email || "guest", sessionId);
+
+    // E. FETCH HISTORY FROM FIREBASE (Single Source of Truth)
+    const messagesSnap = await rtdb.ref(firebaseChatPath).get();
+    const fbMessages = messagesSnap.val() || {};
+    
+    // Sort, limit to last 15, and map Firebase messages to LangChain format
+    const history = Object.values(fbMessages)
+      .sort((a: any, b: any) => a.timestamp - b.timestamp)
+      .slice(-15)
+      .map((m: any) => ({
+        role: m.sender === "user" ? "user" : "assistant",
+        content: m.text,
+        recommendedProducts: m.recommendedProducts || []
+      }));
 
     // E. RUN AI MODEL (LANGCHAIN)
     const { LangChainService } = await import("./langchain.server");
     const langChainService = new LangChainService(shop);
-
-    // Convert DB history to LangChain format
-    const history = (session.messages || []).map((m: any) => ({
-      role: m.role as "user" | "assistant",
-      content: m.content,
-      recommendedProducts: m.recommendedProducts || []
-    }));
 
     // Generate Response
     const aiResult = await langChainService.generateResponse(sessionId, userMessage, history);
@@ -202,7 +218,6 @@ export async function processChatTurn(
     const recommendedProducts = aiResult.recommendedProducts || [];
 
     // F. SAVE RESULTS
-    // 1. Save to SQL
     const productsForDb = recommendedProducts.map((p: { id: string, title?: string, price?: number | string, handle?: string, image?: string, score?: number }) => ({
       id: p.id,
       title: p.title || "",
@@ -212,13 +227,12 @@ export async function processChatTurn(
       score: p.score || 0
     }));
 
-    await saveChatTurn(session.id, userMessage, finalAiText, productsForDb);
-
-    // 2. Save to Firebase
+    // Save to Firebase (Single Source of Truth)
     await rtdb.ref(firebaseChatPath).push({
       sender: "ai",
       text: finalAiText,
       product_ids: productsForDb.map((p: { id: string }) => p.id),
+      recommendedProducts: productsForDb, // For LangChain Context
       timestamp: Date.now(),
     });
 
@@ -262,24 +276,32 @@ export async function* processStreamingChatTurn(
     const metadata = metaSnap.val() || {};
     if (metadata.isHumanSupport) {
       await rtdb.ref(firebaseChatPath).push({ sender: "user", text: userMessage, timestamp: Date.now() });
-      const { session } = await getOrCreateSession(shop, email || "guest");
-      await saveSingleMessage(session.id, "user", userMessage);
+      await getOrCreateSession(shop, email || "guest", sessionId); // For analytics only
       yield { type: "text", content: "Human support is active. A representative will be with you shortly." };
       return;
     }
 
     // 3. Save User Message
     await rtdb.ref(firebaseChatPath).push({ sender: "user", text: userMessage, timestamp: Date.now() });
-    const { session } = await getOrCreateSession(shop, email || "guest");
+    await getOrCreateSession(shop, email || "guest", sessionId); // For analytics only
+
+    // Fetch History directly from Firebase
+    const messagesSnap = await rtdb.ref(firebaseChatPath).get();
+    const fbMessages = messagesSnap.val() || {};
+    
+    // Convert to LangChain format
+    const history = Object.values(fbMessages)
+      .sort((a: any, b: any) => a.timestamp - b.timestamp)
+      .slice(-15)
+      .map((m: any) => ({
+        role: m.sender === "user" ? "user" : "assistant",
+        content: m.text,
+        recommendedProducts: m.recommendedProducts || []
+      }));
 
     // 4. Init Streaming
     const { LangChainService } = await import("./langchain.server");
     const langChainService = new LangChainService(shop);
-    const history = (session.messages || []).map((m: any) => ({
-      role: m.role as "user" | "assistant",
-      content: m.content,
-      recommendedProducts: m.recommendedProducts || []
-    }));
 
     const stream = langChainService.generateStreamingResponse(sessionId, userMessage, history, previewSettings);
     
@@ -296,7 +318,7 @@ export async function* processStreamingChatTurn(
       }
     }
 
-    // 5. Final Save (SQL & Firebase full record)
+    // 5. Final Save (Firebase full record)
     const productsForDb = finalRecommendedProducts.map((p: any) => ({
       id: p.id,
       title: p.title || "",
@@ -306,20 +328,12 @@ export async function* processStreamingChatTurn(
       score: p.score || 0
     }));
 
-    await saveChatTurn(session.id, userMessage, fullText, productsForDb);
-    
-    // We already pushed the chunks, but for historical consistency in Firebase
-    // it's often good to push the final complete message once, but wait...
-    // The widget listens to 'push' events. If we push every chunk, it works.
-    // If we only push the final one, it's not streaming in Firebase.
-    // Given the current architecture uses RTDB 'push', we'll rely on the API stream for real-time
-    // and push the FINAL record to Firebase for persistence after the stream ends.
-    // Actually, usually you'd push the message with 'sender: ai' once.
-    
+    // Push the FINAL complete message to Firebase for persistence
     await rtdb.ref(firebaseChatPath).push({
       sender: "ai",
       text: fullText,
       product_ids: productsForDb.map((p: any) => p.id),
+      recommendedProducts: productsForDb, // For LangChain context
       timestamp: Date.now(),
     });
 

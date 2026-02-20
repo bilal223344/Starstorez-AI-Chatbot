@@ -186,13 +186,12 @@ export class LangChainService {
     if (config.faqEnabled) {
       tools.push(new DynamicStructuredTool({
         name: "search_faq",
-        description: "Search for answers to general questions in the store's FAQ database.",
+        description: "Search for answers to general questions in the store's FAQ database, or specific questions about products.",
         schema: z.object({
           query: z.string().describe("The user's question"),
         }),
         func: async ({ query }) => {
-            // Simple keyword search for now, ideally semantic if embeddings existed for FAQs
-            const faqs = await prisma.fAQ.findMany({
+            const storeFaqs = await prisma.fAQ.findMany({
                 where: { 
                     shop: this.shop,
                     isActive: true,
@@ -203,8 +202,25 @@ export class LangChainService {
                 },
                 take: 3
             });
-            if (faqs.length === 0) return "No specific FAQ found. Try valid general knowledge.";
-            return JSON.stringify(faqs.map(f => ({ question: f.question, answer: f.answer })));
+            
+            const productFaqs = await prisma.productFAQ.findMany({
+                where: {
+                    product: { shop: this.shop },
+                    OR: [
+                        { question: { contains: query, mode: "insensitive" } },
+                        { answer: { contains: query, mode: "insensitive" } }
+                    ]
+                },
+                include: { product: true },
+                take: 3
+            });
+
+            if (storeFaqs.length === 0 && productFaqs.length === 0) return "No specific FAQ found. Try valid general knowledge.";
+            
+            const formattedStoreFaqs = storeFaqs.map(f => ({ type: "Store FAQ", question: f.question, answer: f.answer }));
+            const formattedProductFaqs = productFaqs.map(f => ({ type: `Product FAQ for ${f.product.title}`, question: f.question, answer: f.answer }));
+
+            return JSON.stringify([...formattedStoreFaqs, ...formattedProductFaqs]);
         },
       }));
     }
@@ -251,23 +267,25 @@ export class LangChainService {
     // 5. PRODUCT DETAILS (For deep comparison/info)
     tools.push(new DynamicStructuredTool({
         name: "get_product_details",
-        description: "Get detailed information about a specific product using its ID or handle. Use this when the user asks for 'more info', 'specifications', or when comparing specific products.",
+        description: "Get detailed information about a specific product using its ID, handle, or title. Use this when the user asks for 'more info', 'specifications', or when querying a specific product by name.",
         schema: z.object({
             product_id: z.string().optional().describe("The Shopify GID of the product (e.g., gid://shopify/Product/12345)"),
-            handle: z.string().optional().describe("The handle (URL slug) of the product")
+            handle: z.string().optional().describe("The handle (URL slug) of the product"),
+            title: z.string().optional().describe("The title or name of the product")
         }),
-        func: async ({ product_id, handle }) => {
-            if (!product_id && !handle) return "Please provide either a product ID or a handle.";
+        func: async ({ product_id, handle, title }) => {
+            if (!product_id && !handle && !title) return "Please provide a product ID, handle, or title.";
             
             const product = await prisma.product.findFirst({
                 where: {
                     shop: this.shop,
                     OR: [
                         product_id ? { prodId: product_id } : {},
-                        handle ? { handle: handle } : {}
+                        handle ? { handle: handle } : {},
+                        title ? { title: { contains: title, mode: 'insensitive' } } : {}
                     ].filter(cond => Object.keys(cond).length > 0) as any
                 },
-                include: { variants: true }
+                include: { variants: true, faqs: true }
             });
 
             if (!product) return "Product not found.";
@@ -282,6 +300,10 @@ export class LangChainService {
                     title: v.title,
                     stock: v.stock,
                     option: v.option
+                })),
+                faqs: product.faqs.map(f => ({
+                    question: f.question,
+                    answer: f.answer
                 }))
             });
         }
@@ -364,7 +386,9 @@ export class LangChainService {
                 if (camp.responseMessage) {
                     campaignContext += `The merchant prefers this message for this campaign: "${camp.responseMessage}"\n`;
                 }
-                campaignContext += `Associated Products: ${campaignProducts.map(p => p.title).join(", ")}\n`;
+                campaignContext += `Associated Products:\n${camp.products.map(cp => {
+                     return `- ${cp.Product.title} (Price: $${cp.Product.price})\n  Description: ${cp.Product.description || "N/A"}\n  Available Options: ${JSON.stringify(cp.Product.options || [])}`
+                }).join("\n")}\n`;
                 campaignContext += `INSTRUCTION: Acknowledge these products naturally. Do NOT use tool "recommend_products" again for this specific intent.`;
             }
         }
@@ -414,7 +438,9 @@ export class LangChainService {
         }
         return m.role === "user" ? new HumanMessage(content) : new AIMessage(content);
     });
-
+    console.log("[SYSTEM PROMPT]", systemPrompt);
+    console.log("[FORMATTED HISTORY]", formattedHistory);
+    console.log("[USER MESSAGE]", userMessage);
     const messages: BaseMessage[] = [
         new SystemMessage(systemPrompt),
         ...formattedHistory,
@@ -454,14 +480,20 @@ export class LangChainService {
                     try {
                         const parsed = JSON.parse(result);
                         if (Array.isArray(parsed)) {
-                            recommendedProducts = [...recommendedProducts, ...parsed.map((p: any) => ({
+                            const newProducts = parsed.map((p: any) => ({
                                 id: p.id || p.metadata?.product_id,
                                 title: p.title || p.metadata?.title,
                                 price: p.price || p.metadata?.price,
                                 handle: p.handle || p.metadata?.handle,
                                 image: p.image || p.metadata?.image,
                                 score: p.score || 0
-                            }))];
+                            }));
+                            const existingIds = new Set(recommendedProducts.map(rp => rp.id));
+                            for (const np of newProducts) {
+                                if (!existingIds.has(np.id)) {
+                                    recommendedProducts.push(np);
+                                }
+                            }
                         }
                     } catch (e) {}
                 }
@@ -506,14 +538,20 @@ export class LangChainService {
                     try {
                         const parsed = JSON.parse(result);
                         if (Array.isArray(parsed)) {
-                            recommendedProducts = [...recommendedProducts, ...parsed.map((p: any) => ({
+                            const newProducts = parsed.map((p: any) => ({
                                 id: p.id || p.metadata?.product_id,
                                 title: p.title || p.metadata?.title,
                                 price: p.price || p.metadata?.price,
                                 handle: p.handle || p.metadata?.handle,
                                 image: p.image || p.metadata?.image,
                                 score: p.score || 0
-                            }))];
+                            }));
+                            const existingIds = new Set(recommendedProducts.map(rp => rp.id));
+                            for (const np of newProducts) {
+                                if (!existingIds.has(np.id)) {
+                                    recommendedProducts.push(np);
+                                }
+                            }
                         }
                     } catch (e) {}
                 }

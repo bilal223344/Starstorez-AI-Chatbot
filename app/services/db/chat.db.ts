@@ -1,14 +1,24 @@
 import prisma from "app/db.server";
+import { rtdb } from "app/services/firebaseAdmin.server";
 import { ChatProduct, HistoryFilter } from "app/types/chat.types";
 
 /**
  * 1. WRITES: Manage Sessions & Messages
  */
-export async function getOrCreateSession(shop: string, custMail: string) {
+export async function getOrCreateSession(shop: string, custMail: string, providedSessionId?: string) {
+    if (providedSessionId) {
+        const session = await prisma.chatSession.findUnique({
+            where: { id: providedSessionId }
+        }) as any;
+
+        if (session) {
+            return { session, customerId: session.customerId };
+        }
+    }
+
     if (!custMail || custMail === "guest") {
         const guestSession = (await prisma.chatSession.create({
-            data: { shop, isGuest: true },
-            include: { messages: { include: { recommendedProducts: true } } }
+            data: { id: providedSessionId, shop, isGuest: true }
         } as any)) as any;
 
         return { session: guestSession, customerId: null };
@@ -25,24 +35,21 @@ export async function getOrCreateSession(shop: string, custMail: string) {
         } as any,
     })) as any;
 
-    // 2. Find Active Session
-    const session = (await prisma.chatSession.findFirst({
-        where: { customerId: customer.id, shop },
-        include: {
-            messages: { 
-                take: 10, 
-                orderBy: { createdAt: "asc" },
-                include: { recommendedProducts: true }
-            }
-        }
-    } as any)) as any;
+    if (!providedSessionId) {
+        // 2. Find Active Session if no sessionId provided
+        const activeSession = (await prisma.chatSession.findFirst({
+            where: { customerId: customer.id, shop },
+            orderBy: { createdAt: "desc" }
+        } as any)) as any;
 
-    if (session) return { session, customerId: customer.id };
+        if (activeSession) {
+            return { session: activeSession, customerId: customer.id };
+        }
+    }
 
     // 3. Create New
     const newSession = (await prisma.chatSession.create({
-        data: { shop, customerId: customer.id, isGuest: false },
-        include: { messages: { include: { recommendedProducts: true } } }
+        data: { id: providedSessionId, shop, customerId: customer.id, isGuest: false }
     } as any)) as any;
 
     return { session: newSession, customerId: customer.id };
@@ -134,23 +141,42 @@ export async function fetchChatHistory(filter: HistoryFilter) {
         if (endDate) whereClause.createdAt.lte = new Date(endDate);
     }
 
-    // 3. Execute Database Query
-    // We fetch sessions AND their messages in one go
-    const sessions = (await prisma.chatSession.findMany({
+    // 3. Execute Database Query to get Sessions
+    const sessionsList = (await prisma.chatSession.findMany({
         where: whereClause,
-        include: {
-            messages: {
-                // For paginated mode, we filter messages by date
-                where: mode === "paginated" && beforeDate
-                    ? { createdAt: { lt: beforeDate } }
-                    : undefined,
-                orderBy: { createdAt: "desc" }, // Newest first
-                take: mode === "paginated" ? limit : undefined, // Limit only if paginating
-                include: { recommendedProducts: true },
-            },
-        },
         orderBy: { createdAt: "desc" },
     } as any)) as any[];
+
+    const safeShop = shop.replace(/\./g, "_");
+
+    // 3.5 Fetch Messages for all matching sessions from Firebase
+    const sessions = await Promise.all(sessionsList.map(async (s) => {
+        try {
+            const snap = await rtdb.ref(`chats/${safeShop}/${s.id}/messages`).get();
+            const msgs = snap.val() || {};
+            const sessionMessages = Object.values(msgs).map((m: any) => ({
+                id: m.timestamp.toString(), // Pseudo ID
+                role: m.sender === "user" ? "user" : "assistant",
+                content: m.text,
+                createdAt: new Date(m.timestamp),
+                recommendedProducts: m.recommendedProducts || []
+            }));
+            
+            // Sort chronologically (oldest to newest)
+            sessionMessages.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+            return { ...s, messages: sessionMessages };
+        } catch (e) {
+            console.error(`Failed to fetch fb messages for session ${s.id}`, e);
+            return { ...s, messages: [] };
+        }
+    }));
+
+    // If paginated mode and beforeDate is set, filter out newer messages locally
+    if (mode === "paginated" && beforeDate) {
+        sessions.forEach(s => {
+            s.messages = s.messages.filter((m: any) => m.createdAt < beforeDate);
+        });
+    }
 
     // 4. Analytics Calculation (Only for 'analyze' mode)
     let statistics = null;
@@ -180,14 +206,14 @@ export async function fetchChatHistory(filter: HistoryFilter) {
             content: msg.content,
             createdAt: msg.createdAt,
             products: msg.recommendedProducts.map((p: any) => ({
-                id: p.productProdId,
+                id: p.id,
                 title: p.title,
                 price: p.price,
                 handle: p.handle,
                 image: p.image,
                 score: p.score
             }))
-        })).reverse() // Flip back to chronological order (Oldest -> Newest) for Chat UI
+        })) // Already chronological
     }));
 
     // 6. Handle Pagination Logic (Single Stream of Messages)
@@ -205,15 +231,18 @@ export async function fetchChatHistory(filter: HistoryFilter) {
             paging.hasMore = true;
             paging.nextBefore = allMessages[allMessages.length - 1].createdAt.toISOString();
         }
+        
+        // Take limit
+        const slicedMessages = allMessages.slice(0, limit);
 
         // Format the flattened list
-        resultMessages = allMessages.map((msg: any) => ({
+        resultMessages = slicedMessages.map((msg: any) => ({
             id: msg.id,
             role: msg.role,
             content: msg.content,
             createdAt: msg.createdAt,
             products: msg.recommendedProducts.map((p: any) => ({
-                id: p.productProdId,
+                id: p.id,
                 title: p.title,
                 price: p.price,
                 handle: p.handle,
