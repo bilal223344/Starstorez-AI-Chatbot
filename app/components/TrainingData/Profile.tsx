@@ -53,7 +53,7 @@ export default function Profile({ brandProfile: initialBrandProfile }: { brandPr
 
     const handleSave = () => {
         fetcher.submit(
-            { intent: "saveBrandProfile", ...formData },
+            { actionType: "update_brand", ...formData },
             { method: "post" }
         );
     };

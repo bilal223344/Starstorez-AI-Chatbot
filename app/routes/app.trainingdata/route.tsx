@@ -10,6 +10,15 @@ import { Database } from "lucide-react";
 import FAQs from "app/components/TrainingData/FAQs";
 import { syncProductById } from "app/services/productService";
 import { generateEmbeddings, upsertVectors } from "app/services/pineconeService";
+import type { StorePolicy } from "@prisma/client";
+
+export interface ShopifyPolicy {
+    id: string;
+    title: string | null;
+    body: string | null;
+    url: string | null;
+    type: string;
+}
 
 // --- LOADER ---
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -63,7 +72,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             console.error("Failed to fetch access scopes for policies", e);
         }
 
-        let policies: any[] = [];
+        let policies: StorePolicy[] = [];
 
         try {
             policies = await prisma.storePolicy.findMany({ where: { shop } });
@@ -87,16 +96,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                     }
                 `);
                 const responseJson = await response.json();
-                const shopifyPolicies = responseJson.data?.shop?.shopPolicies || [];
-                const validPolicies = shopifyPolicies.filter((p: any) => p.body && p.body.trim().length > 0);
+                const shopifyPolicies: ShopifyPolicy[] = responseJson.data?.shop?.shopPolicies || [];
+                const validPolicies = shopifyPolicies.filter((p: ShopifyPolicy) => p.body && p.body.trim().length > 0);
 
                 if (validPolicies.length > 0) {
                     await prisma.storePolicy.createMany({
-                        data: validPolicies.map((p: any) => ({
+                        data: validPolicies.map((p: ShopifyPolicy) => ({
                             shop,
                             type: p.type,
                             title: p.title || p.type,
-                            body: p.body,
+                            body: p.body || "",
                             url: p.url || ""
                         }))
                     });
@@ -104,9 +113,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                     policies = await prisma.storePolicy.findMany({ where: { shop } });
 
                     const namespaceUrl = shop.replace(/\./g, "_");
-                    const texts = validPolicies.map((p: any) => `Policy: ${p.title}\n\n${p.body}`);
+                    const texts = validPolicies.map((p: ShopifyPolicy) => `Policy: ${p.title}\n\n${p.body}`);
                     const vectors = await generateEmbeddings(texts);
-                    const records = validPolicies.map((p: any, i: number) => ({
+                    const records = validPolicies.map((p: ShopifyPolicy, i: number) => ({
                         id: `policy_${p.type}`,
                         values: vectors[i],
                         metadata: {
@@ -173,26 +182,48 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const getProfileData = async () => {
         let brandProfile = {};
         try {
-            const response = await admin.graphql(`
-                query {
-                    shop {
-                        primaryDomain { url }
-                        brandStory: metafield(namespace: "ai_context", key: "story") { value }
-                        brandLocation: metafield(namespace: "ai_context", key: "location") { value }
-                        brandStoreType: metafield(namespace: "ai_context", key: "store_type") { value }
+            const profile = await prisma.storeProfile.findUnique({ where: { shop } });
+            if (profile) {
+                brandProfile = {
+                    story: profile.story || "",
+                    location: profile.location || "",
+                    storeType: profile.storeType || "online",
+                    primaryDomain: profile.primaryDomain || ""
+                };
+            } else {
+                const newProfile = await prisma.storeProfile.create({
+                    data: {
+                        shop,
+                        story: "",
+                        location: "",
+                        storeType: "online",
+                        primaryDomain: ""
                     }
-                }
-            `);
-            const responseJson = await response.json();
-            const shopData = responseJson.data?.shop || {};
-            brandProfile = {
-                story: shopData.brandStory?.value || "",
-                location: shopData.brandLocation?.value || "",
-                storeType: shopData.brandStoreType?.value || "online",
-                primaryDomain: shopData.primaryDomain?.url || ""
-            };
+                });
+                
+                brandProfile = {
+                    story: newProfile.story || "",
+                    location: newProfile.location || "",
+                    storeType: newProfile.storeType || "online",
+                    primaryDomain: newProfile.primaryDomain || ""
+                };
+
+                const namespaceUrl = shop.replace(/\./g, "_");
+                const textContent = `Brand Profile:\nStory: ${newProfile.story}\nLocation: ${newProfile.location}\nStore Type: ${newProfile.storeType}`;
+                const vectors = await generateEmbeddings([textContent]);
+                
+                await upsertVectors(namespaceUrl, [{
+                    id: "store_profile",
+                    values: vectors[0],
+                    metadata: {
+                        type: "PROFILE",
+                        title: "Store Profile",
+                        text_content: textContent
+                    }
+                }]);
+            }
         } catch (e) {
-            console.error("Failed to fetch brand metafields", e);
+            console.error("Failed to fetch brand profile", e);
         }
         return brandProfile;
     };
@@ -212,7 +243,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     // --- DEFER ---
     // We only trigger the Promise for the ACTIVE tab. Others are null.
-
     const getProductsData = async () => {
         const pageStr = url.searchParams.get("page") || "1";
         const page = parseInt(pageStr, 10);
@@ -579,29 +609,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                     }
                 `);
                 const responseJson = await response.json();
-                const policies = responseJson.data?.shop?.shopPolicies || [];
+                const policies: ShopifyPolicy[] = responseJson.data?.shop?.shopPolicies || [];
                 
                 // Filter out empty policies
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const validPolicies = policies.filter((p: any) => p.body && p.body.trim().length > 0);
+                const validPolicies = policies.filter((p: ShopifyPolicy) => p.body && p.body.trim().length > 0);
                 
                 if (validPolicies.length > 0) {
                     for (const p of validPolicies) {
                         await prisma.storePolicy.upsert({
                             where: { shop_type: { shop, type: p.type } },
-                            update: { title: p.title || p.type, body: p.body, url: p.url || "" },
-                            create: { shop, type: p.type, title: p.title || p.type, body: p.body, url: p.url || "" }
+                            update: { title: p.title || p.type, body: p.body || "", url: p.url || "" },
+                            create: { shop, type: p.type, title: p.title || p.type, body: p.body || "", url: p.url || "" }
                         });
                     }
 
                     const namespaceUrl = shop.replace(/\./g, "_");
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    const texts = validPolicies.map((p: any) => `Policy: ${p.title}\n\n${p.body}`);
+                    const texts = validPolicies.map((p: ShopifyPolicy) => `Policy: ${p.title}\n\n${p.body}`);
                     
                     const vectors = await generateEmbeddings(texts);
                     
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    const records = validPolicies.map((p: any, i: number) => ({
+                    const records = validPolicies.map((p: ShopifyPolicy, i: number) => ({
                         id: `policy_${p.type}`,
                         values: vectors[i],
                         metadata: {
@@ -618,7 +645,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                 }
                 
                 return Response.json({ success: true, message: "No content found in Shopify policies to sync." });
-            } catch (err: any) {
+            } catch (err: unknown) {
                 console.error("Failed to sync policies to DB/Pinecone", err);
                 return Response.json({ success: false, message: "Failed to sync to AI." });
             }
@@ -661,49 +688,42 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             const location = formData.get("location") as string;
             const storeType = formData.get("storeType") as string;
 
-            // Get Shop ID helper
-            const shopIdResp = await admin.graphql('{ shop { id } }');
-            const shopIdJson = await shopIdResp.json();
-            const shopId = shopIdJson.data.shop.id;
+            try {
+                const existingProfile = await prisma.storeProfile.findUnique({ where: { shop } });
+                const hasChanged = !existingProfile || 
+                                   existingProfile.story !== story || 
+                                   existingProfile.location !== location || 
+                                   existingProfile.storeType !== storeType;
 
-            const metafieldsToSet = [
-                { ownerId: shopId, namespace: "ai_context", key: "story", type: "multi_line_text_field", value: story },
-                { ownerId: shopId, namespace: "ai_context", key: "location", type: "single_line_text_field", value: location },
-                { ownerId: shopId, namespace: "ai_context", key: "store_type", type: "single_line_text_field", value: storeType }
-            ].filter(m => m.value && m.value.trim() !== ""); // Filter out empty values
+                // Upsert in Prisma
+                await prisma.storeProfile.upsert({
+                    where: { shop },
+                    update: { story, location, storeType },
+                    create: { shop, story, location, storeType, primaryDomain: "" }
+                });
 
-            console.log("[Update Brand] Shop ID:", shopId);
-            console.log("[Update Brand] Payload:", JSON.stringify(metafieldsToSet));
-
-            if (metafieldsToSet.length === 0) {
-                return Response.json({ success: true, message: "No changes to save." });
-            }
-
-            const response = await admin.graphql(`mutation MetafieldsSet($metafields: [MetafieldsSetInput!]!) {
-                metafieldsSet(metafields: $metafields) {
-                    metafields {
-                        id
-                        key
-                        value
-                    }
-                    userErrors {
-                        field
-                        message
+                if (hasChanged) {
+                    // Update Pinecone Vector
+                    const namespaceUrl = shop.replace(/\./g, "_");
+                    const textContent = `Brand Profile:\nStory: ${story}\nLocation: ${location}\nStore Type: ${storeType}`;
+                    const vectors = await generateEmbeddings([textContent]);
+                    
+                    await upsertVectors(namespaceUrl, [{
+                        id: "store_profile",
+                        values: vectors[0],
+                        metadata: {
+                            type: "PROFILE",
+                            title: "Store Profile",
+                            text_content: textContent
                         }
+                    }]);
                 }
-            }`, {
-                variables: {
-                    metafields: metafieldsToSet
-                }
-            });
-            const responseJson = await response.json();
-            const userErrors = responseJson.data?.metafieldsSet?.userErrors || [];
 
-            if (userErrors.length > 0) {
-                return Response.json({ success: false, message: userErrors[0].message });
+                return Response.json({ success: true, message: "Brand profile updated in database and AI." });
+            } catch (err) {
+                console.error("Failed to update brand profile", err);
+                return Response.json({ success: false, message: "Failed to update brand profile." });
             }
-
-            return Response.json({ success: true, message: "Brand profile updated" });
         }
 
         if (actionType === "update_policy") {

@@ -28,24 +28,24 @@ model Session {
 }
 
 model Product {
-  id             Int               @id @default(autoincrement())
-  shop           String
-  prodId         String            @unique
-  title          String
-  description    String?
-  tags           String[]
-  collection     String[]
-  options        Json
-  price          Float
-  stock          Int
-  handle         String?
-  image          String?
-  isSynced       Boolean           @default(false)
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
-  faqs           ProductFAQ[]
-  variants       ProductVariant[]
-  inCampaigns    CampaignProduct[]
+  id          Int               @id @default(autoincrement())
+  shop        String
+  prodId      String            @unique
+  title       String
+  description String?
+  tags        String[]
+  collection  String[]
+  options     Json
+  price       Float
+  stock       Int
+  handle      String?
+  image       String?
+  isSynced    Boolean           @default(false)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  faqs        ProductFAQ[]
+  variants    ProductVariant[]
+  inCampaigns CampaignProduct[]
 
   @@index([shop])
 }
@@ -174,21 +174,20 @@ model ChatConfiguration {
 }
 
 model Customer {
-  id          String        @id @default(uuid())
-  shopifyId   String?       @unique
-  email       String
-  firstName   String?
-  lastName    String?
-  phone       String?
-  source      String        @default("SHOPIFY")
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  shop        String
+  id        String   @id @default(uuid())
+  shopifyId String?  @unique
+  email     String
+  firstName String?
+  lastName  String?
+  phone     String?
+  source    String   @default("SHOPIFY")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  shop      String
 
   @@unique([shop, email])
   @@index([shop, email])
 }
-
 
 model StorePolicy {
   id        String   @id @default(uuid())
@@ -201,5 +200,18 @@ model StorePolicy {
   updatedAt DateTime @updatedAt
 
   @@unique([shop, type])
+  @@index([shop])
+}
+
+model StoreProfile {
+  id            String   @id @default(uuid())
+  shop          String   @unique
+  story         String?
+  location      String?
+  storeType     String?
+  primaryDomain String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
   @@index([shop])
 }

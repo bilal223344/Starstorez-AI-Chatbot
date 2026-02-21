@@ -7,6 +7,7 @@ interface Product {
     id: number;
     prodId: string;
     title: string;
+    vendor?: string;
     stock: number;
     tags: string[];
     image: string | null;
@@ -90,7 +91,7 @@ export default function Products({ products: initialProductsData }: { products: 
     const handleFaqClick = (product: Product) => {
         setActiveProduct(product);
     };
-console.log(products)
+
     const handleCreateFaq = () => {
         if (!activeProduct || !newQuestion.trim() || !newAnswer.trim()) return;
         const formData = new FormData();
@@ -232,7 +233,7 @@ console.log(products)
                                         <s-thumbnail size="small" src={product.image || ""} alt={product.title} />
                                         <s-stack>
                                             <s-link target="_blank">{product.title}</s-link>
-                                            <s-text>{(product as any).vendor}</s-text>
+                                            <s-text>{product.vendor}</s-text>
                                         </s-stack>
                                     </s-stack>
                                 </s-table-cell>

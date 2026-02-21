@@ -255,7 +255,7 @@ export class LangChainService {
         func: async ({ order_number }) => {
             // TODO: Query Shopify API directly or use an alternative
             // Prisma Order table was deleted
-            return "Order tracking is currently unavailable as the database schema was updated.";
+            return "Order tracking is currently unavailable.";
         }
     }));
 

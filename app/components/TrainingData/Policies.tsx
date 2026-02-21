@@ -130,7 +130,14 @@ export default function Policies({ policies: initialPolicies, hasScope: initialH
     };
 
     const handleRequestScope = async () => {
-        const response = await (window as any).shopify.scopes.request([
+        const shopifyWindow = window as unknown as {
+            shopify: {
+                scopes: {
+                    request: (scopes: string[]) => Promise<{ result: string }>;
+                };
+            };
+        };
+        const response = await shopifyWindow.shopify.scopes.request([
             "read_legal_policies",
             "write_legal_policies",
         ]);
