@@ -1,4 +1,4 @@
-import { PineconeEmbedResponse, PineconeMetadata, PineconeNamespaceResponse, PineconeRecord, RawMetadata, SavedOrder, ShopifyProductNode, VectorData } from "app/types";
+import { PineconeEmbedResponse, PineconeMetadata, PineconeNamespaceResponse, PineconeRecord, RawMetadata, FormattedOrderData, ShopifyProductNode, VectorData } from "app/types";
 
 const PINECONE_API_KEY = process.env.PINECONE_API_KEY || "";
 const INDEX_HOST = (process.env.INDEX_HOST || "").replace(/^https?:\/\//, "");
@@ -262,10 +262,10 @@ export const deleteVectorFromPinecone = async (namespace: string, vectorId: stri
     }
 };
 
-export const prepareOrderForPinecone = (order: SavedOrder): VectorData => {
-    // order argument is the result from prisma.order.upsert (includes OrderItem and Customer)
+export const prepareOrderForPinecone = (order: FormattedOrderData): VectorData => {
+    // order argument is the formatted data directly
 
-    const itemNames = order.OrderItem.map((i) => `${i.quantity}x ${i.productName}`).join(", ");
+    const itemNames = order.items.create.map((i) => `${i.quantity}x ${i.productName}`).join(", ");
 
     // 1. Text Context: This is what the AI searches against
     const textToEmbed = `
@@ -277,11 +277,11 @@ export const prepareOrderForPinecone = (order: SavedOrder): VectorData => {
     `.trim().replace(/\s+/g, " ");
 
     // 2. Metadata: CRITICAL for filtering
-    // We use order.Customer.id (The Prisma UUID) so the Chatbot knows who owns this order
+    // We use order._customerPayload.id (The Shopify ID) so the Chatbot knows who owns this order
     const metadata = {
         type: "ORDER",
         order_id: order.shopifyId, // External ID
-        internal_user_id: order.Customer.id, // Internal UUID for filtering
+        internal_user_id: order._customerPayload?.id || "unknown", // Internal UUID for filtering
         order_number: order.orderNumber,
         status: order.status,
         text_content: textToEmbed // Store text so AI can read it without hitting DB again

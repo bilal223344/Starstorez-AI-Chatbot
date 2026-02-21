@@ -1,9 +1,6 @@
-import { PrismaClient } from '@prisma/client';
 import { shopifyGraphqlRequest, sleep } from 'app/utils/extra';
 import { checkPineconeNamespace, createPineconeNamespace, generateEmbeddings, prepareOrderForPinecone, upsertVectors } from './pineconeService';
 import { FormattedOrderData, NamespaceCreationResult, PineconeRecord, ShopifyGraphqlResponse, ShopifyOrderNode, ShopifyOrdersResponse, VectorData } from 'app/types';
-
-const prisma = new PrismaClient();
 
 
 // --- SYNC ALL ORDERS ---
@@ -157,7 +154,7 @@ export const formatShopifyOrder = (node: ShopifyOrderNode, shop: string): Format
         // We pass the raw customer to handle the relationship in the DB function
         _customerPayload: node.customer,
         shop: shop // Pass shop down
-    } as any;
+    };
 };
 
 // --- DB Actions ---
@@ -165,7 +162,7 @@ export const saveOrderToDB = async (formattedData: FormattedOrderData & { shop: 
     // TODO: Direct to Pinecone or alternative layer.
     // Prisma Order/OrderItem tables have been deleted.
     console.warn("saveOrderToDB: DB insertion skipped; Order schema no longer exists in Prisma.");
-    return formattedData as any;
+    return formattedData;
 };
 
 export const deleteOrderFromDB = async (shopifyId: string) => {

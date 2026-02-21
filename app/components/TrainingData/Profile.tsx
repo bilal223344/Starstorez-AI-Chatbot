@@ -9,6 +9,7 @@ interface BrandProfile {
     website: string;
     storeType: string;
     primaryDomain: string;
+    supportEmail: string;
 }
 
 export default function Profile({ brandProfile: initialBrandProfile }: { brandProfile: BrandProfile }) {
@@ -20,6 +21,7 @@ export default function Profile({ brandProfile: initialBrandProfile }: { brandPr
         website: initialBrandProfile?.website || initialBrandProfile?.primaryDomain || "",
         storeType: initialBrandProfile?.storeType || "online",
         primaryDomain: initialBrandProfile?.primaryDomain || "",
+        supportEmail: initialBrandProfile?.supportEmail || "",
     });
     const [notification, setNotification] = useState<{ type: string; message: string } | null>(null);
 
@@ -32,6 +34,7 @@ export default function Profile({ brandProfile: initialBrandProfile }: { brandPr
                 website: initialBrandProfile.website || initialBrandProfile.primaryDomain || "",
                 storeType: initialBrandProfile.storeType || "online",
                 primaryDomain: initialBrandProfile.primaryDomain || "",
+                supportEmail: initialBrandProfile.supportEmail || "",
             });
         }
     }, [initialBrandProfile]);
@@ -146,6 +149,19 @@ export default function Profile({ brandProfile: initialBrandProfile }: { brandPr
                         value={formData.website}
                         disabled={true}
                         help-text="Managed in Shopify Settings > Domains"
+                    />
+                </s-grid>
+            </s-stack>
+
+            <s-stack gap="small-200" borderRadius="base" padding="base" border="base" background="subdued">
+                <s-heading>Contact Information</s-heading>
+                <s-grid gridTemplateColumns="1fr 1fr" gap="base">
+                    <s-email-field
+                        label="Email"
+                        placeholder="bernadette.lapresse@jadedpixel.com"
+                        details="Used for sending notifications"
+                        value={formData.supportEmail}
+                        onInput={(e: CallbackEvent<"s-email-field">) => setFormData({ ...formData, supportEmail: e.currentTarget.value })}
                     />
                 </s-grid>
             </s-stack>

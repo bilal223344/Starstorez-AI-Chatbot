@@ -1,5 +1,4 @@
 import { data, type ActionFunctionArgs } from "react-router";
-import prisma from "app/db.server";
 import { summarizeConversation } from "app/services/ai/orchestrator";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -17,7 +16,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // Fetch chat history
     // TODO: Port to Firebase. Requires 'shop' parameter.
-    const messages: any[] = [];
+    const messages: { role: string; content: string }[] = [];
 
     if (messages.length === 0) {
       return data({ error: "No messages found for this session" }, { status: 404 });

@@ -27,7 +27,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         }
       }`
     );
-    const { data }: any = await graphqlResponse.json();
+    const { data } = (await graphqlResponse.json()) as {
+      data?: {
+        themes?: {
+          edges?: Array<{
+            node?: {
+              id?: string;
+            };
+          }>;
+        };
+      };
+    };
     themeId = data?.themes?.edges?.[0]?.node?.id?.split("/").pop();
   } catch (error) {
     console.warn("Failed to fetch App ID or Theme ID:", error);
@@ -54,7 +64,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // TODO: Port analytics to Firebase
   const totalMessages = 0;
   const pendingHandoffs = 0;
-  const recentChats: any[] = [];
+  const recentChats: Array<{
+    id: string;
+    createdAt: string | Date;
+    Customer?: { id: string; firstName?: string; email?: string } | null;
+    messages: Array<{ role: string; content: string; createdAt: string | Date }>;
+  }> = [];
   const totalCustomers = 0;
 
   // --- 3. Format Sync Status ---
@@ -170,28 +185,28 @@ export default function Dashboard() {
               {recentChats.length === 0 ? (
                 <s-table-row><s-table-cell><s-text color="subdued">No recent chats found.</s-text></s-table-cell></s-table-row>
               ) : (
-                recentChats.map((chat: any) => (
+                recentChats.map((chat) => (
                   <s-table-row key={chat.id}>
                     <s-table-cell>
                       <s-stack direction="inline" gap="small" alignItems="center">
-                        <s-avatar size="small" initials={(chat as any).Customer?.firstName?.[0] || "G"} />
-                        <s-link href={`/app/chats/management?customerId=${(chat as any).Customer?.id || ''}`}>
-                          {(chat as any).Customer?.email || "Guest User"}
+                        <s-avatar size="small" initials={chat.Customer?.firstName?.[0] || "G"} />
+                        <s-link href={`/app/chats/management?customerId=${chat.Customer?.id || ''}`}>
+                          {chat.Customer?.email || "Guest User"}
                         </s-link>
                       </s-stack>
                     </s-table-cell>
                     <s-table-cell>
-                      <s-badge tone={(chat as any).messages[0]?.role === "assistant" ? "success" : "caution"}>
-                        {(chat as any).messages[0]?.role === "assistant" ? "AI Managed" : "Awaiting Reply"}
+                      <s-badge tone={chat.messages?.[0]?.role === "assistant" ? "success" : "caution"}>
+                        {chat.messages?.[0]?.role === "assistant" ? "AI Managed" : "Awaiting Reply"}
                       </s-badge>
                     </s-table-cell>
                     <s-table-cell>
                       <div style={{ maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        <s-text tone="neutral">{(chat as any).messages[0]?.content || "No messages"}</s-text>
+                        <s-text tone="neutral">{chat.messages?.[0]?.content || "No messages"}</s-text>
                       </div>
                     </s-table-cell>
                     <s-table-cell>
-                      {new Date((chat as any).messages[0]?.createdAt || chat.createdAt).toLocaleString()}
+                      {new Date(chat.messages?.[0]?.createdAt || chat.createdAt).toLocaleString()}
                     </s-table-cell>
                   </s-table-row>
                 ))

@@ -184,20 +184,64 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         try {
             const profile = await prisma.storeProfile.findUnique({ where: { shop } });
             if (profile) {
+                let supportEmail = profile.supportEmail;
+                if (!supportEmail) {
+                    try {
+                        const response = await admin.graphql(`
+                            query GetShopSupportEmail {
+                              shop {
+                                contactEmail
+                                email
+                                name
+                              }
+                            }
+                        `);
+                        const responseJson = await response.json();
+                        supportEmail = responseJson.data?.shop?.contactEmail || responseJson.data?.shop?.email || "";
+                        if (supportEmail) {
+                            await prisma.storeProfile.update({
+                                where: { shop },
+                                data: { supportEmail }
+                            });
+                        }
+                    } catch (e) {
+                         console.error("Failed to fetch support email", e);
+                    }
+                }
+
                 brandProfile = {
                     story: profile.story || "",
                     location: profile.location || "",
                     storeType: profile.storeType || "online",
-                    primaryDomain: profile.primaryDomain || ""
+                    primaryDomain: profile.primaryDomain || "",
+                    supportEmail: supportEmail || ""
                 };
             } else {
+                let supportEmail = "";
+                try {
+                    const response = await admin.graphql(`
+                        query GetShopSupportEmail {
+                          shop {
+                            contactEmail
+                            email
+                            name
+                          }
+                        }
+                    `);
+                    const responseJson = await response.json();
+                    supportEmail = responseJson.data?.shop?.contactEmail || responseJson.data?.shop?.email || "";
+                } catch (e) {
+                     console.error("Failed to fetch support email", e);
+                }
+
                 const newProfile = await prisma.storeProfile.create({
                     data: {
                         shop,
                         story: "",
                         location: "",
                         storeType: "online",
-                        primaryDomain: ""
+                        primaryDomain: "",
+                        supportEmail
                     }
                 });
                 
@@ -205,11 +249,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                     story: newProfile.story || "",
                     location: newProfile.location || "",
                     storeType: newProfile.storeType || "online",
-                    primaryDomain: newProfile.primaryDomain || ""
+                    primaryDomain: newProfile.primaryDomain || "",
+                    supportEmail: newProfile.supportEmail || ""
                 };
 
                 const namespaceUrl = shop.replace(/\./g, "_");
-                const textContent = `Brand Profile:\nStory: ${newProfile.story}\nLocation: ${newProfile.location}\nStore Type: ${newProfile.storeType}`;
+                const textContent = `Brand Profile:\nStory: ${newProfile.story}\nLocation: ${newProfile.location}\nStore Type: ${newProfile.storeType}\nSupport Email: ${newProfile.supportEmail}`;
                 const vectors = await generateEmbeddings([textContent]);
                 
                 await upsertVectors(namespaceUrl, [{
@@ -687,25 +732,27 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             const story = formData.get("story") as string;
             const location = formData.get("location") as string;
             const storeType = formData.get("storeType") as string;
+            const supportEmail = formData.get("supportEmail") as string;
 
             try {
                 const existingProfile = await prisma.storeProfile.findUnique({ where: { shop } });
                 const hasChanged = !existingProfile || 
                                    existingProfile.story !== story || 
                                    existingProfile.location !== location || 
-                                   existingProfile.storeType !== storeType;
+                                   existingProfile.storeType !== storeType ||
+                                   existingProfile.supportEmail !== supportEmail;
 
                 // Upsert in Prisma
                 await prisma.storeProfile.upsert({
                     where: { shop },
-                    update: { story, location, storeType },
-                    create: { shop, story, location, storeType, primaryDomain: "" }
+                    update: { story, location, storeType, supportEmail },
+                    create: { shop, story, location, storeType, primaryDomain: "", supportEmail }
                 });
 
                 if (hasChanged) {
                     // Update Pinecone Vector
                     const namespaceUrl = shop.replace(/\./g, "_");
-                    const textContent = `Brand Profile:\nStory: ${story}\nLocation: ${location}\nStore Type: ${storeType}`;
+                    const textContent = `Brand Profile:\nStory: ${story}\nLocation: ${location}\nStore Type: ${storeType}\nSupport Email: ${supportEmail}`;
                     const vectors = await generateEmbeddings([textContent]);
                     
                     await upsertVectors(namespaceUrl, [{
