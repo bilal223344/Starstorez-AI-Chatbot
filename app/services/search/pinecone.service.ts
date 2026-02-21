@@ -91,7 +91,8 @@ export async function searchPinecone(
         // Fetch more candidates if we need to sort by price (to get a good pool)
         const fetchLimit = (sort === "price_asc" || sort === "price_desc") ? 100 : 50;
 
-        const response = await fetch(`https://${INDEX_HOST}/query`, {
+        const baseUrl = INDEX_HOST.startsWith("http") ? INDEX_HOST : `https://${INDEX_HOST}`;
+        const response = await fetch(`${baseUrl}/query`, {
             method: "POST",
             headers: {
                 "Api-Key": PINECONE_API_KEY,

@@ -238,10 +238,10 @@ const prepareProductForPinecone = (product: ShopifyProductNode) => {
 
 export const deleteVectorFromPinecone = async (namespace: string, vectorId: string) => {
     try {
-        const response = await fetch(`https://${process.env.INDEX_HOST}/vectors/delete`, {
+        const response = await fetch(`https://${INDEX_HOST}/vectors/delete`, {
             method: "POST",
             headers: {
-                "Api-Key": process.env.PINECONE_API_KEY || "",
+                "Api-Key": PINECONE_API_KEY,
                 "Content-Type": "application/json",
                 "X-Pinecone-Api-Version": "2025-10"
             },

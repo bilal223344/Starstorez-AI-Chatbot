@@ -182,68 +182,73 @@ export class LangChainService {
       },
     }));
 
-    // 2. FAQ SEARCH (If Enabled)
-    if (config.faqEnabled) {
-      tools.push(new DynamicStructuredTool({
-        name: "search_faq",
-        description: "Search for answers to general questions in the store's FAQ database, or specific questions about products.",
-        schema: z.object({
-          query: z.string().describe("The user's question"),
-        }),
-        func: async ({ query }) => {
-            const storeFaqs = await prisma.fAQ.findMany({
-                where: { 
-                    shop: this.shop,
-                    isActive: true,
-                    OR: [
-                        { question: { contains: query, mode: "insensitive" } },
-                        { answer: { contains: query, mode: "insensitive" } }
-                    ]
-                },
-                take: 3
-            });
-            
-            const productFaqs = await prisma.productFAQ.findMany({
-                where: {
-                    product: { shop: this.shop },
-                    OR: [
-                        { question: { contains: query, mode: "insensitive" } },
-                        { answer: { contains: query, mode: "insensitive" } }
-                    ]
-                },
-                include: { product: true },
-                take: 3
-            });
+    // 2. FAQ SEARCH
+    tools.push(new DynamicStructuredTool({
+      name: "search_faq",
+      description: "Search for answers to general questions in the store's FAQ database, or specific questions about products.",
+      schema: z.object({
+        query: z.string().describe("The user's question"),
+      }),
+      func: async ({ query }) => {
+          if (!config.faqEnabled) {
+              const profile = await prisma.storeProfile.findUnique({ where: { shop: this.shop } }) as any;
+              return `FAQ information is currently restricted. Please advise the user to contact support at ${profile?.supportEmail || "our support team"}.`;
+          }
 
-            if (storeFaqs.length === 0 && productFaqs.length === 0) return "No specific FAQ found. Try valid general knowledge.";
-            
-            const formattedStoreFaqs = storeFaqs.map(f => ({ type: "Store FAQ", question: f.question, answer: f.answer }));
-            const formattedProductFaqs = productFaqs.map(f => ({ type: `Product FAQ for ${f.product.title}`, question: f.question, answer: f.answer }));
+          const storeFaqs = await prisma.fAQ.findMany({
+              where: { 
+                  shop: this.shop,
+                  isActive: true,
+                  OR: [
+                      { question: { contains: query, mode: "insensitive" } },
+                      { answer: { contains: query, mode: "insensitive" } }
+                  ]
+              },
+              take: 3
+          });
+          
+          const productFaqs = await prisma.productFAQ.findMany({
+              where: {
+                  product: { shop: this.shop },
+                  OR: [
+                      { question: { contains: query, mode: "insensitive" } },
+                      { answer: { contains: query, mode: "insensitive" } }
+                  ]
+              },
+              include: { product: true },
+              take: 3
+          });
 
-            return JSON.stringify([...formattedStoreFaqs, ...formattedProductFaqs]);
-        },
-      }));
-    }
+          if (storeFaqs.length === 0 && productFaqs.length === 0) return "No specific FAQ found. Try valid general knowledge.";
+          
+          const formattedStoreFaqs = storeFaqs.map(f => ({ type: "Store FAQ", question: f.question, answer: f.answer }));
+          const formattedProductFaqs = productFaqs.map(f => ({ type: `Product FAQ for ${f.product.title}`, question: f.question, answer: f.answer }));
 
-    // 3. DISCOUNT CHECK (If Enabled)
-    if (config.discountSuggestionsEnabled) {
-        tools.push(new DynamicStructuredTool({
-            name: "get_active_discounts",
-            description: "Check for active discount codes available for the customer.",
-            schema: z.object({}),
-            func: async () => {
-                const discounts = await prisma.discount.findMany({
-                    where: { 
-                        shop: this.shop, 
-                        status: "ACTIVE",
-                        isSuggested: true // key flag
-                    }
-                });
-                if (discounts.length === 0) return "No active discounts available to suggest.";
-                return JSON.stringify(discounts.map(d => ({ code: d.code, title: d.title })));
+          return JSON.stringify([...formattedStoreFaqs, ...formattedProductFaqs]);
+      },
+    }));
+
+    // 3. DISCOUNT CHECK
+    tools.push(new DynamicStructuredTool({
+        name: "get_active_discounts",
+        description: "Check for active discount codes available for the customer.",
+        schema: z.object({}),
+        func: async () => {
+            if (!config.discountSuggestionsEnabled) {
+                const profile = await prisma.storeProfile.findUnique({ where: { shop: this.shop } }) as any;
+                return `Discounts are currently restricted. Please advise the user to contact support at ${profile?.supportEmail || "our support team"}.`;
             }
-        }));
-    }
+            const discounts = await prisma.discount.findMany({
+                where: { 
+                    shop: this.shop, 
+                    status: "ACTIVE",
+                    isSuggested: true // key flag
+                }
+            });
+            if (discounts.length === 0) return "No active discounts available to suggest.";
+            return JSON.stringify(discounts.map(d => ({ code: d.code, title: d.title })));
+        }
+    }));
     
     // 4. ORDER TRACKING
     tools.push(new DynamicStructuredTool({
@@ -304,6 +309,56 @@ export class LangChainService {
         }
     }));
 
+    // 6. STORE POLICIES
+    tools.push(new DynamicStructuredTool({
+        name: "get_store_policies",
+        description: "Get the store's shipping, refund, privacy, or terms of service policies. Use 'All' to summarize all policies.",
+        schema: z.object({
+            policy_type: z.enum(["Refund", "Privacy", "Shipping", "Terms of Service", "All"]).describe("The specific policy to retrieve.")
+        }),
+        func: async ({ policy_type }) => {
+            if (!config.faqEnabled) {
+                const profile = await prisma.storeProfile.findUnique({ where: { shop: this.shop } }) as any;
+                return `Policy information is currently restricted. Please advise the user to contact support at ${profile?.supportEmail || "our support team"}.`;
+            }
+
+            const policies = await prisma.storePolicy.findMany({
+                where: { shop: this.shop }
+            });
+
+            if (policies.length === 0) return "No policies are currently configured for this store.";
+
+            if (policy_type === "All") {
+                return JSON.stringify(policies.map(p => ({ title: p.title, body: p.body })));
+            }
+
+            const policy = policies.find(p => p.type === policy_type || p.title.includes(policy_type));
+            if (!policy) return `The ${policy_type} policy was not found.`;
+
+            return JSON.stringify({ title: policy.title, body: policy.body });
+        }
+    }));
+
+    // 7. STORE PROFILE
+    tools.push(new DynamicStructuredTool({
+        name: "get_store_profile",
+        description: "Get information about the store's brand, story, location, and contact email.",
+        schema: z.object({}),
+        func: async () => {
+            const profile = await prisma.storeProfile.findUnique({
+                where: { shop: this.shop }
+            }) as any;
+            if (!profile) return "No store profile information available.";
+            
+            return JSON.stringify({
+                story: profile.story,
+                location: profile.location,
+                storeType: profile.storeType,
+                supportEmail: profile.supportEmail
+            });
+        }
+    }));
+
     return tools;
   }
 
@@ -353,7 +408,10 @@ export class LangChainService {
     const persona = aiSettings.responseTone?.customInstructions || "Expert sales associate";
     const customInstructions = aiSettings.aiInstructions || "";
     const responseTone = aiSettings.responseTone?.selectedTone?.join(", ") || "Helpful, Professional";
-    const primaryLanguage = aiSettings.languageSettings?.primaryLanguage || "English";
+    const autoDetect = aiSettings.languageSettings?.autoDetect === true;
+    const languageInstruction = autoDetect ? 
+        "ALWAYS respond in English, regardless of the user's language." : 
+        `ALWAYS respond in ${aiSettings.languageSettings?.primaryLanguage || "English"}, regardless of the user's language.`;
 
     // 2. Check CAMPAIGNS (Trigger Keywords)
     let campaignContext = "";
@@ -401,25 +459,23 @@ export class LangChainService {
       Assistant Name: ${assistantName}
       Persona: ${persona}
       Tone of Voice: ${responseTone}
-      Primary Language: ${primaryLanguage}
+      Language Rule: ${languageInstruction}
       Custom Instructions: ${customInstructions}
 
       [STORE CONTEXT]
       ${storeContext}
 
       [ADDITIONAL MERCHANT INFO]
-      ${aiSettings.storeDetails?.location ? `Location: ${aiSettings.storeDetails.location}` : ""}
-      ${aiSettings.policies?.shipping ? `Shipping Policy: ${aiSettings.policies.shipping}` : ""}
-      ${aiSettings.policies?.payment ? `Payment Policy: ${aiSettings.policies.payment}` : ""}
-      ${aiSettings.policies?.refund ? `Refund Policy: ${aiSettings.policies.refund}` : ""}
+      Use the provided tools ('get_store_profile', 'get_store_policies', 'search_faq') to fetch store profile information, policies, and FAQs dynamically as needed. Do NOT guess.
 
       ${campaignContext ? `\n[ONGOING CAMPAIGN CONTEXT]\n${campaignContext}\n` : ""}
 
       IMPORTANT:
       - You are ${assistantName}.
-      -Persona: ${persona}. Tone: ${responseTone}. Language: ${primaryLanguage}.
+      - Persona: ${persona}. Tone: ${responseTone}.
+      - ${languageInstruction}
       - Use available tools. If products are found, mention them naturally.
-      - Keep responses concise and friendly.
+      - Keep responses concisely formatted per the Global Formatting Rules.
     `;
 
     // 5. Build Message History
