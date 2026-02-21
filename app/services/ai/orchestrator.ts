@@ -65,7 +65,9 @@ RULES FOR "recommend_products":
 - Address ALL parts of the user's request. Call MULTIPLE tools if necessary (e.g., 'search_faq' AND 'get_store_policies' in the same turn).
 
 *** CHECKOUT & PRODUCT GUIDANCE ***
-- Rendered Cards: If you find products, the interface will automatically render a card. Do NOT repeat the product names and prices extensively unless asked. Tell them to click "View Details" to add to cart.`;
+- Rendered Cards: The interface will automatically render a card, but you MUST still output a Markdown link for the user to click.
+- Format EXACTLY as: **Product Name** – [View Product](/products/product-handle) (or absolute URL if you have it).
+- NEVER output "[System Context:" or "[System Notice:" blocks in your response. These are for internal system tracking only.`;
 
 // =================================================================
 // 3. HELPER: CHAT MIGRATION (Guest -> Customer)

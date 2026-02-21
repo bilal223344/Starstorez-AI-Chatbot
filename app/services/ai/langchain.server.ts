@@ -479,15 +479,20 @@ export class LangChainService {
     `;
 
     // 5. Build Message History
-    const formattedHistory = history.map(m => {
+    const formattedHistory: BaseMessage[] = [];
+    history.forEach(m => {
         let content = m.content;
-        if (m.role === "assistant" && m.recommendedProducts && m.recommendedProducts.length > 0) {
-            const productStrings = m.recommendedProducts.map((p: any) => 
-                `ID: ${p.id || p.productProdId}, Title: ${p.title}, Price: $${p.price}`
-            ).join(" | ");
-            content += `\n\n[System Context: You rendered visual product cards to the user for the following items: ${productStrings}]`;
+        if (m.role === "user") {
+            formattedHistory.push(new HumanMessage(content));
+        } else {
+            if (m.recommendedProducts && m.recommendedProducts.length > 0) {
+                const productStrings = m.recommendedProducts.map((p: any) => 
+                    `ID: ${p.id || p.productProdId}, Title: ${p.title}, Price: $${p.price}`
+                ).join(" | ");
+                content += `\n\n[INTERNAL RECORD: You rendered cards for: ${productStrings}. Do not mention this internal record.]`;
+            }
+            formattedHistory.push(new AIMessage(content));
         }
-        return m.role === "user" ? new HumanMessage(content) : new AIMessage(content);
     });
     console.log("[SYSTEM PROMPT]", systemPrompt);
     console.log("[FORMATTED HISTORY]", formattedHistory);
