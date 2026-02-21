@@ -43,7 +43,6 @@ model Product {
   isSynced       Boolean           @default(false)
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
-  MessageProduct MessageProduct[]
   faqs           ProductFAQ[]
   variants       ProductVariant[]
   inCampaigns    CampaignProduct[]
@@ -74,67 +73,6 @@ model ProductFAQ {
   product   Product  @relation(fields: [productId], references: [id])
 
   @@index([productId])
-}
-
-model ChatSession {
-  id         String    @id @default(uuid())
-  customerId String?
-  isGuest    Boolean   @default(true)
-  createdAt  DateTime  @default(now())
-  shop       String
-  Customer   Customer? @relation(fields: [customerId], references: [id])
-  messages   Message[]
-
-  @@index([shop])
-  @@index([customerId])
-}
-
-model Message {
-  id                  String           @id @default(uuid())
-  content             String
-  role                String
-  createdAt           DateTime         @default(now())
-  sessionId           String
-  ChatSession         ChatSession      @relation(fields: [sessionId], references: [id])
-  recommendedProducts MessageProduct[]
-}
-
-model MessageProduct {
-  id            String   @id @default(uuid())
-  messageId     String
-  productProdId String?
-  title         String
-  price         Float
-  handle        String?
-  image         String?
-  score         Float?
-  message       Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  Product       Product? @relation(fields: [productProdId], references: [prodId])
-
-  @@index([messageId])
-  @@index([productProdId])
-}
-
-model MerchantCredits {
-  id               String       @id @default(uuid())
-  shop             String       @unique
-  planId           String
-  totalCredits     Int          @default(0)
-  usedCredits      Int          @default(0)
-  remainingCredits Int          @default(0)
-  totalRequests    Int          @default(0)
-  totalUsers       Int          @default(0)
-  periodStart      DateTime     @default(now())
-  periodEnd        DateTime
-  aiEnabled        Boolean      @default(true)
-  autoRecharge     Boolean      @default(true)
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
-  MerchantPlan     MerchantPlan @relation(fields: [planId], references: [id])
-  UsageLog         UsageLog[]
-
-  @@index([planId])
-  @@index([shop])
 }
 
 model Campaign {
@@ -246,64 +184,22 @@ model Customer {
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
   shop        String
-  ChatSession ChatSession[]
-  Order       Order[]
 
   @@unique([shop, email])
   @@index([shop, email])
 }
 
-model MerchantPlan {
-  id                 String            @id @default(uuid())
-  name               String            @unique
-  monthlyCredits     Int
-  maxConcurrentChats Int
-  price              Float
-  features           Json
-  isActive           Boolean           @default(true)
-  createdAt          DateTime          @default(now())
-  MerchantCredits    MerchantCredits[]
-}
 
-model Order {
-  id          String      @id @default(uuid())
-  shopifyId   String      @unique
-  orderNumber String
-  status      String
-  totalPrice  Float
-  createdAt   DateTime
-  customerId  String
-  Customer    Customer    @relation(fields: [customerId], references: [id])
-  OrderItem   OrderItem[]
-}
+model StorePolicy {
+  id        String   @id @default(uuid())
+  shop      String
+  title     String
+  body      String
+  url       String?
+  type      String // e.g., "PRIVACY_POLICY", "REFUND_POLICY", etc.
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-model OrderItem {
-  id          String  @id @default(uuid())
-  productName String
-  quantity    Int
-  sku         String?
-  orderId     String
-  productId   String
-  Order       Order   @relation(fields: [orderId], references: [id])
-}
-
-model UsageLog {
-  id                String          @id @default(uuid())
-  shop              String
-  merchantCreditsId String
-  requestType       String
-  creditsUsed       Int             @default(1)
-  sessionId         String?
-  customerId        String?
-  userMessage       String?
-  responseTime      Int?
-  tokensUsed        Int?
-  wasSuccessful     Boolean         @default(true)
-  errorMessage      String?
-  createdAt         DateTime        @default(now())
-  MerchantCredits   MerchantCredits @relation(fields: [merchantCreditsId], references: [id])
-
-  @@index([merchantCreditsId])
-  @@index([requestType])
-  @@index([shop, createdAt])
+  @@unique([shop, type])
+  @@index([shop])
 }

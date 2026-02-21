@@ -1,7 +1,7 @@
 import { PineconeEmbedResponse, PineconeMetadata, PineconeNamespaceResponse, PineconeRecord, RawMetadata, SavedOrder, ShopifyProductNode, VectorData } from "app/types";
 
 const PINECONE_API_KEY = process.env.PINECONE_API_KEY || "";
-const INDEX_HOST = process.env.INDEX_HOST || "";
+const INDEX_HOST = (process.env.INDEX_HOST || "").replace(/^https?:\/\//, "");
 
 // ============================================================================
 // MAIN EXPORTS

@@ -16,11 +16,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     // Fetch chat history
-    const messages = await prisma.message.findMany({
-      where: { sessionId },
-      orderBy: { createdAt: "asc" },
-      select: { role: true, content: true },
-    });
+    // TODO: Port to Firebase. Requires 'shop' parameter.
+    const messages: any[] = [];
 
     if (messages.length === 0) {
       return data({ error: "No messages found for this session" }, { status: 404 });

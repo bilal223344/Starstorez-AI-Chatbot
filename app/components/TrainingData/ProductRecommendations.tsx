@@ -128,7 +128,7 @@ export default function ProductRecommendations({ campaigns: initialCampaigns, pr
         })) || [];
 
         try {
-            const selected = await window.shopify.resourcePicker({
+            const selected = await (window as any).shopify.resourcePicker({
                 type: "product",
                 multiple: true,
                 action: "select",
@@ -139,7 +139,7 @@ export default function ProductRecommendations({ campaigns: initialCampaigns, pr
                 // Map selected items to our local Product interface
                 // If the product exists in allProducts, use that (to get the numeric ID)
                 // Otherwise, create a temporary Product object from the picker data
-                const newProducts = selected.map((p) => {
+                const newProducts = selected.map((p: any) => {
                     const existing = allProducts.find(ap => ap.prodId === p.id || ap.prodId.endsWith(`/${p.id}`) || p.id.endsWith(`/${ap.prodId}`));
                     if (existing) return existing;
 

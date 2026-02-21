@@ -10,14 +10,11 @@ export async function processChat(
     try {
         // 1. Session Setup (DB Layer)
         const sessionResult = await getOrCreateSession(shop, custMail);
-        const session = (sessionResult as { session: ChatSessionWithMessages }).session;
+        const session = (sessionResult as any).session;
 
         // 2. Prepare History (Include recommended products for context)
-        const history = session.messages.map((m) => ({
-            role: m.role as "user" | "assistant",
-            content: m.content,
-            recommendedProducts: m.recommendedProducts || []
-        }));
+        // TODO: Port history fetching to Firebase.
+        const history: any[] = [];
 
         // 3. AI Pass via LangChain (Handles Tool Calling internally)
         const langChainService = new LangChainService(shop);

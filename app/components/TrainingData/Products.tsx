@@ -232,7 +232,7 @@ console.log(products)
                                         <s-thumbnail size="small" src={product.image || ""} alt={product.title} />
                                         <s-stack>
                                             <s-link target="_blank">{product.title}</s-link>
-                                            <s-text>{(product as string).vendor}</s-text>
+                                            <s-text>{(product as any).vendor}</s-text>
                                         </s-stack>
                                     </s-stack>
                                 </s-table-cell>

@@ -9,6 +9,7 @@ import Profile from "app/components/TrainingData/Profile";
 import { Database } from "lucide-react";
 import FAQs from "app/components/TrainingData/FAQs";
 import { syncProductById } from "app/services/productService";
+import { generateEmbeddings, upsertVectors } from "app/services/pineconeService";
 
 // --- LOADER ---
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -62,16 +63,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             console.error("Failed to fetch access scopes for policies", e);
         }
 
-        interface ShopPolicy {
-            id: string;
-            title: string;
-            body: string;
-            url: string;
-            type: string;
-        }
-        let policies: ShopPolicy[] = [];
+        let policies: any[] = [];
 
-        if (hasScope) {
+        try {
+            policies = await prisma.storePolicy.findMany({ where: { shop } });
+        } catch (e) {
+            console.error("Failed to query StorePolicy from DB", e);
+        }
+
+        if (policies.length === 0 && hasScope) {
             try {
                 const response = await admin.graphql(`
                     query {
@@ -87,14 +87,40 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
                     }
                 `);
                 const responseJson = await response.json();
-                policies = (responseJson.data?.shop?.shopPolicies || []) as ShopPolicy[];
-            } catch (e: unknown) {
-                console.error("Failed to fetch policies", e);
-                const error = e as Error;
-                if (error.message?.includes("Access denied") || JSON.stringify(error).includes("Access denied")) {
-                    console.warn("Access denied for policies, marking scope as missing.");
-                    hasScope = false;
+                const shopifyPolicies = responseJson.data?.shop?.shopPolicies || [];
+                const validPolicies = shopifyPolicies.filter((p: any) => p.body && p.body.trim().length > 0);
+
+                if (validPolicies.length > 0) {
+                    await prisma.storePolicy.createMany({
+                        data: validPolicies.map((p: any) => ({
+                            shop,
+                            type: p.type,
+                            title: p.title || p.type,
+                            body: p.body,
+                            url: p.url || ""
+                        }))
+                    });
+                    
+                    policies = await prisma.storePolicy.findMany({ where: { shop } });
+
+                    const namespaceUrl = shop.replace(/\./g, "_");
+                    const texts = validPolicies.map((p: any) => `Policy: ${p.title}\n\n${p.body}`);
+                    const vectors = await generateEmbeddings(texts);
+                    const records = validPolicies.map((p: any, i: number) => ({
+                        id: `policy_${p.type}`,
+                        values: vectors[i],
+                        metadata: {
+                            type: "POLICY",
+                            policy_type: p.type,
+                            title: p.title || p.type,
+                            url: p.url || "",
+                            text_content: texts[i]
+                        }
+                    }));
+                    await upsertVectors(namespaceUrl, records);
                 }
+            } catch (e: unknown) {
+                console.error("Failed to fetch policies during initial setup", e);
             }
         }
         return { policies, hasScope };
@@ -538,46 +564,64 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         }
 
         if (actionType === "sync_policy") {
-            const policiesToSync = ["shipping-policy", "refund-policy", "privacy-policy", "terms-of-service"];
-            const results = [];
-
-            const shopIdResp = await admin.graphql('{ shop { id } }');
-            const shopIdJson = await shopIdResp.json();
-            const shopId = shopIdJson.data?.shop?.id;
-            if (!shopId) {
-                console.error("Failed to fetch shop ID", shopIdJson);
-                return Response.json({ success: false, message: "Failed to fetch Shop ID" });
-            }
-            const ownerId = `gid://shopify/Shop/${shopId.split('/').pop()}`;
-
-            for (const handle of policiesToSync) {
-                const metafieldDef = {
-                    namespace: "app_policies",
-                    key: handle,
-                    type: "single_line_text_field",
-                    value: new Date().toISOString(),
-                    ownerId
-                };
-
-                await admin.graphql(`mutation MetafieldsSet($metafields: [MetafieldsSetInput!]!) {
-                    metafieldsSet(metafields: $metafields) {
-                        metafields {
-                            id
-                        }
-                        userErrors {
-                            field
-                            message
+            try {
+                const response = await admin.graphql(`
+                    query {
+                        shop {
+                            shopPolicies {
+                                id
+                                title
+                                body
+                                url
+                                type
+                            }
                         }
                     }
-                }`, {
-                    variables: {
-                        metafields: [metafieldDef]
+                `);
+                const responseJson = await response.json();
+                const policies = responseJson.data?.shop?.shopPolicies || [];
+                
+                // Filter out empty policies
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const validPolicies = policies.filter((p: any) => p.body && p.body.trim().length > 0);
+                
+                if (validPolicies.length > 0) {
+                    for (const p of validPolicies) {
+                        await prisma.storePolicy.upsert({
+                            where: { shop_type: { shop, type: p.type } },
+                            update: { title: p.title || p.type, body: p.body, url: p.url || "" },
+                            create: { shop, type: p.type, title: p.title || p.type, body: p.body, url: p.url || "" }
+                        });
                     }
-                });
-                results.push(handle);
-            }
 
-            return Response.json({ success: true, message: `Policies synced: ${results.join(", ")}` });
+                    const namespaceUrl = shop.replace(/\./g, "_");
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const texts = validPolicies.map((p: any) => `Policy: ${p.title}\n\n${p.body}`);
+                    
+                    const vectors = await generateEmbeddings(texts);
+                    
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const records = validPolicies.map((p: any, i: number) => ({
+                        id: `policy_${p.type}`,
+                        values: vectors[i],
+                        metadata: {
+                            type: "POLICY",
+                            policy_type: p.type,
+                            title: p.title || p.type,
+                            url: p.url || "",
+                            text_content: texts[i]
+                        }
+                    }));
+                    
+                    await upsertVectors(namespaceUrl, records);
+                    return Response.json({ success: true, message: "Policies synced directly to internal AI and Database" });
+                }
+                
+                return Response.json({ success: true, message: "No content found in Shopify policies to sync." });
+            } catch (err: any) {
+                console.error("Failed to sync policies to DB/Pinecone", err);
+                return Response.json({ success: false, message: "Failed to sync to AI." });
+            }
         }
 
         // --- STORE FAQ ACTIONS ---
@@ -666,35 +710,40 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             const type = formData.get("type") as string; // e.g. "REFUND_POLICY"
             const body = formData.get("body") as string;
 
-            const response = await admin.graphql(`mutation shopPolicyUpdate($shopPolicy: ShopPolicyInput!) {
-                shopPolicyUpdate(shopPolicy: $shopPolicy) {
-                    shopPolicy {
-                        id
-                        body
-                        type
-                    }
-                    userErrors {
-                        field
-                        message
-                        }
-                }
-            }`, {
-                variables: {
-                    shopPolicy: {
-                        type,
-                        body
-                    }
-                }
-            });
-
-            const responseJson = await response.json();
-            const userErrors = responseJson.data?.shopPolicyUpdate?.userErrors || [];
-
-            if (userErrors.length > 0) {
-                return Response.json({ success: false, message: userErrors[0].message });
+            if (!body || body.trim().length === 0) {
+                return Response.json({ success: false, message: "Body cannot be empty" });
             }
 
-            return Response.json({ success: true, message: "Policy updated" });
+            try {
+                // Update Prisma Record
+                await prisma.storePolicy.upsert({
+                    where: { shop_type: { shop, type } },
+                    update: { body },
+                    create: { shop, type, title: type.replace(/_/g, " "), body, url: "" }
+                });
+
+                // Update Pinecone Vector
+                const namespaceUrl = shop.replace(/\./g, "_");
+                const textContent = `Policy: ${type}\n\n${body}`;
+                const vectors = await generateEmbeddings([textContent]);
+                
+                await upsertVectors(namespaceUrl, [{
+                    id: `policy_${type}`,
+                    values: vectors[0],
+                    metadata: {
+                        type: "POLICY",
+                        policy_type: type,
+                        title: type.replace(/_/g, " "),
+                        url: "",
+                        text_content: textContent
+                    }
+                }]);
+            } catch (err) {
+                console.error("Failed to save edited policy to DB/Pinecone", err);
+                return Response.json({ success: false, message: "Failed to save policy." });
+            }
+
+            return Response.json({ success: true, message: "Policy updated in database and AI." });
         }
 
 

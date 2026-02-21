@@ -14,16 +14,16 @@ export const performInitialSync = async (shop: string, accessToken: string) => {
         await syncProduct(shop, accessToken);
 
         // --- STEP 2: ORDERS ---
-        console.log("📦 [2/3] Syncing Orders...");
-        await syncAllOrders(shop, accessToken);
+        // console.log("📦 [2/3] Syncing Orders...");
+        // await syncAllOrders(shop, accessToken);
 
         // --- STEP 3: CUSTOMERS ---
         console.log("👤 [3/3] Syncing Customers...");
-        await syncAllCustomers(shop, accessToken); // Note: import path might need adjustment based on valid paths
+        await syncAllCustomers(shop, accessToken);
 
         console.log("🎉 [SUCCESS] Initial sync completed.");
     } catch (error) {
         console.error("❌ [SYNC ERROR] Failed during initial sync:", error);
-        throw error; // Re-throw to let caller know
+        throw error;
     }
 };

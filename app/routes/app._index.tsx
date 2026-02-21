@@ -35,59 +35,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   // --- 2. Parallel Data Fetching ---
   const [
-    totalMessages,
-    pendingHandoffs,
-    recentChats,
     syncStatus,
-    totalProducts,
-    totalCustomers
+    totalProducts
   ] = await Promise.all([
-    // A. Total Messages
-    prisma.message.count({
-      where: { ChatSession: { shop } }
-    }),
-
-    // B. Human Handoffs (Sessions needing attention)
-    prisma.chatSession.count({
-      where: {
-        shop,
-        messages: { some: {} },
-        // Logic: Session exists, has messages, but NO assistant reply implies human needed OR manual takeover
-        NOT: { messages: { some: { role: "assistant" } } }
-      }
-    }),
-
-    // C. Recent Conversations
-    prisma.chatSession.findMany({
-      where: { shop },
-      take: 10,
-      orderBy: { createdAt: "desc" },
-      include: {
-        Customer: true,
-        messages: {
-          take: 1,
-          orderBy: { createdAt: "desc" }
-        }
-      }
-    }) as any,
-
-    // D. AI Training Status
+    // A. AI Training Status
     prisma.product.groupBy({
       by: ['isSynced'],
       where: { shop },
       _count: true
     }),
 
-    // E. Total Products (New Metric)
+    // B. Total Products (New Metric)
     prisma.product.count({
-      where: { shop }
-    }),
-
-    // F. Active Customers (New Metric - Total customers in DB)
-    prisma.customer.count({
       where: { shop }
     })
   ]);
+
+  // TODO: Port analytics to Firebase
+  const totalMessages = 0;
+  const pendingHandoffs = 0;
+  const recentChats: any[] = [];
+  const totalCustomers = 0;
 
   // --- 3. Format Sync Status ---
   const syncedCount = syncStatus.find(s => s.isSynced)?._count || 0;

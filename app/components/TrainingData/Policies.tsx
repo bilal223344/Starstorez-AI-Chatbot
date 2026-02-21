@@ -60,7 +60,7 @@ function PolicyCard({
 
     const handleSave = () => {
         fetcher.submit(
-            { intent: "savePolicy", type, body },
+            { actionType: "update_policy", type, body },
             { method: "post" }
         );
     };
@@ -126,12 +126,11 @@ export default function Policies({ policies: initialPolicies, hasScope: initialH
     };
 
     const handleSync = () => {
-        fetcher.submit({ intent: "syncPolicies" }, { method: "post" });
+        fetcher.submit({ actionType: "sync_policy" }, { method: "post" });
     };
 
     const handleRequestScope = async () => {
-        // @ts-expect-error - Shopify global object typing mismatch
-        const response = await window.shopify.scopes.request([
+        const response = await (window as any).shopify.scopes.request([
             "read_legal_policies",
             "write_legal_policies",
         ]);

@@ -162,50 +162,15 @@ export const formatShopifyOrder = (node: ShopifyOrderNode, shop: string): Format
 
 // --- DB Actions ---
 export const saveOrderToDB = async (formattedData: FormattedOrderData & { shop: string }) => {
-    const { _customerPayload, items, shop, ...orderData } = formattedData;
-
-    try {
-        return (await prisma.order.upsert({
-            where: { shopifyId: orderData.shopifyId },
-            create: {
-                ...orderData,
-                OrderItem: items,
-                Customer: {
-                    connectOrCreate: {
-                        where: { shopifyId: _customerPayload.id },
-                        create: {
-                            shopifyId: _customerPayload.id,
-                            email: _customerPayload.email,
-                            lastName: _customerPayload.lastName,
-                            source: "SHOPIFY",
-                            shop: shop,
-                            updatedAt: new Date()
-                        } as any
-                    }
-                }
-            } as any,
-            update: {
-                ...orderData,
-                OrderItem: {
-                    deleteMany: {},
-                    create: items.create
-                }
-            } as any,
-            include: {
-                Customer: true,
-                OrderItem: true
-            } as any
-        })) as any;
-    } catch (error) {
-        console.error(`[DB Error] Order Sync Failed:`, error);
-        throw error;
-    }
+    // TODO: Direct to Pinecone or alternative layer.
+    // Prisma Order/OrderItem tables have been deleted.
+    console.warn("saveOrderToDB: DB insertion skipped; Order schema no longer exists in Prisma.");
+    return formattedData as any;
 };
 
 export const deleteOrderFromDB = async (shopifyId: string) => {
     try {
-        await prisma.order.delete({ where: { shopifyId } });
-        console.log(`[DB] Deleted Order ${shopifyId}`);
+        console.log(`[DB] Skipped deleting Order ${shopifyId} (table removed)`);
     } catch (error) {
         console.error(`[DB Error] Delete Order Failed:`, error);
     }

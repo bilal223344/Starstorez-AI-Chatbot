@@ -76,85 +76,16 @@ interface ChatInterfaceProps {
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
     const { session } = await authenticate.admin(request);
+    
+    // TODO: Port ChatSession and Customer listing to Firebase Realtime Database
+    // Prisma tables (ChatSession, Message, Customer) are deleted.
+    console.warn("app.chats.management loader needs to be ported to Firebase");
 
     if (!session?.shop) {
         return { customers: [] as Customer[] };
     }
 
-    try {
-        const chatSessions = await prisma.chatSession.findMany({
-            where: { shop: session.shop },
-            include: {
-                Customer: true,
-                Message: {
-                    orderBy: { createdAt: "asc" },
-                    include: {
-                        recommendedProducts: true // Include products recommended by AI
-                    }
-                }
-            },
-            orderBy: { createdAt: "desc" }
-        }) as any[];
-
-        // Group sessions by customer (including guests)
-        const customersMap = new Map<string, Customer>();
-
-        for (const sessionRow of chatSessions) {
-            const isGuest = !(sessionRow as any).Customer;
-            const customerId = (sessionRow as any).Customer?.id ?? `guest-${sessionRow.id}`;
-
-            let customer = customersMap.get(customerId);
-
-            if (!customer) {
-                customer = {
-                    id: customerId,
-                    shopifyId: (sessionRow as any).Customer?.shopifyId ?? null,
-                    email: (sessionRow as any).Customer?.email ?? "guest",
-                    firstName: (sessionRow as any).Customer?.firstName ?? (isGuest ? "Guest" : null),
-                    lastName: (sessionRow as any).Customer?.lastName ?? null,
-                    phone: (sessionRow as any).Customer?.phone ?? null,
-                    source: (sessionRow as any).Customer?.source ?? (isGuest ? "WEBSITE" : "SHOPIFY"),
-                    createdAt: (sessionRow as any).Customer?.createdAt ?? sessionRow.createdAt,
-                    chats: []
-                };
-                customersMap.set(customerId, customer);
-            }
-
-            const chatSession: ChatSession = {
-                id: sessionRow.id,
-                customerId: sessionRow.customerId,
-                isGuest: sessionRow.isGuest,
-                createdAt: sessionRow.createdAt,
-                messages: ((sessionRow as any).Message as any[] || []).map((m: any) => ({
-                    id: m.id,
-                    content: m.content,
-                    role: m.role as "user" | "assistant" | "system",
-                    createdAt: m.createdAt,
-                    // FIX: Convert nulls from Prisma to undefined for TypeScript compatibility
-                    products:
-                        m.role === "assistant" && m.recommendedProducts.length > 0
-                            ? m.recommendedProducts.map((p: any) => ({
-                                id: p.productProdId ?? undefined, // Converts null to undefined
-                                title: p.title,
-                                price: p.price,
-                                handle: p.handle ?? undefined,    // Converts null to undefined
-                                image: p.image ?? undefined,      // Converts null to undefined
-                                score: p.score ?? undefined,      // Converts null to undefined
-                            }))
-                            : undefined,
-                }))
-            };
-
-            customer.chats.push(chatSession);
-        }
-
-        const customers = Array.from(customersMap.values());
-
-        return { customers };
-    } catch (error) {
-        console.error("[LOADER] Error fetching chats:", error);
-        return { customers: [] as Customer[] };
-    }
+    return { customers: [] as Customer[] };
 };
 
 // ============================================================================

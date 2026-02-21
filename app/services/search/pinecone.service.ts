@@ -64,75 +64,9 @@ export async function searchPinecone(
         }
 
         if (sort === "best_selling") {
-            try {
-                // Find top selling products by aggregating OrderItem
-                // Relation filtering in groupBy can be tricky, so we fetch Order IDs first
-                const orders = await prisma.order.findMany({
-                    where: { Customer: { shop } },
-                    select: { id: true }
-                });
-                
-                if (orders.length === 0) {
-                     return searchPinecone(shop, query, minPrice, maxPrice, "newest", boostAttribute);
-                }
-
-                const orderIds = orders.map(o => o.id);
-
-                const topItems = await prisma.orderItem.groupBy({
-                    by: ['productId'],
-                    _sum: { quantity: true },
-                    orderBy: { _sum: { quantity: 'desc' } },
-                    take: 10,
-                    where: {
-                        orderId: { in: orderIds }
-                    }
-                });
-                
-                // If no orders, fallback to newest
-                if (topItems.length === 0) {
-                     return searchPinecone(shop, query, minPrice, maxPrice, "newest", boostAttribute);
-                }
-
-                const productIds = topItems.map(item => item.productId);
-                
-                const products = await prisma.product.findMany({
-                    where: {
-                        shop,
-                        prodId: { in: productIds } 
-                    }
-                });
-
-                // Re-sort/Map (Handle undefined _sum safely)
-                const sortedProducts = products.sort((a, b) => {
-                    const aItem = topItems.find(i => i.productId === a.prodId);
-                    const bItem = topItems.find(i => i.productId === b.prodId);
-                    const aSales = aItem?._sum?.quantity ?? 0;
-                    const bSales = bItem?._sum?.quantity ?? 0;
-                    return bSales - aSales;
-                });
-
-                const matches: PineconeMatch[] = sortedProducts.map(p => ({
-                     id: p.prodId,
-                     score: 1.0, 
-                     metadata: {
-                         product_id: p.prodId,
-                         title: p.title,
-                         price: p.price,
-                         price_val: p.price,
-                         handle: p.handle || "",
-                         image: p.image || "",
-                         description: p.description || "",
-                         inventory_status: p.stock > 0 ? "in_stock" : "out_of_stock",
-                         product_type: "Product",
-                         vendor: "Store"
-                     }
-                 }));
-                 return { matches, debug };
-
-            } catch (e) {
-                console.error("Best selling sort error, falling back to Pinecone", e);
-                // Fallthrough to normal search
-            }
+            // TODO: 'Order' and 'OrderItem' tables deleted. Re-implement Best Selling logic.
+            console.warn("Best selling sort requested, but Order schema is deleted. Falling back to newest.");
+            return searchPinecone(shop, query, minPrice, maxPrice, "newest", boostAttribute);
         }
 
 

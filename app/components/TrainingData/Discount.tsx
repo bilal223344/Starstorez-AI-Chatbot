@@ -68,7 +68,7 @@ export default function Discount({
             <s-card>
                 <s-box padding="base">
                     <s-stack direction="inline" justifyContent="space-between" alignItems="center">
-                        <s-stack gap="extra-tight">
+                        <s-stack gap="none">
                             <s-text><strong>Master Discount Trigger</strong></s-text>
                             <s-text color="subdued">
                                 {masterEnabled

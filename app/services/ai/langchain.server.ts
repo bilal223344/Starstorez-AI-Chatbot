@@ -253,14 +253,9 @@ export class LangChainService {
             order_number: z.string().describe("The order number (e.g., #1001 or 1001)")
         }),
         func: async ({ order_number }) => {
-            const order = await prisma.order.findFirst({
-                where: { 
-                    Customer: { shop: this.shop },
-                    orderNumber: { contains: order_number } // loose match
-                }
-            });
-            if (!order) return "Order not found.";
-            return JSON.stringify({ status: order.status, total: order.totalPrice });
+            // TODO: Query Shopify API directly or use an alternative
+            // Prisma Order table was deleted
+            return "Order tracking is currently unavailable as the database schema was updated.";
         }
     }));
 

@@ -125,10 +125,8 @@ async function migrateGuestChatToCustomer(shop: string, guestId: string, custome
     await rtdb.ref(customerPath).update(messages);
 
     // Update SQL Ownership in Prisma
-    await prisma.message.updateMany({
-      where: { sessionId: guestId },
-      data: { sessionId: customerId }
-    });
+    // TODO: Removed since Prisma Message table was deleted. 
+    // Data is now migrating strictly in Firebase Realtime Database.
 
     // Delete old Guest path to avoid duplicates
     await guestRef.remove();
